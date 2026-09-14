@@ -3,9 +3,32 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 
-const FRAME_COUNT = 120;
-const framePath = (i: number) =>
+const AST_COUNT = 120;
+const GR_COUNT = 78;
+const astPath = (i: number) =>
   `/frames/asteroid/frame_${String(i).padStart(3, "0")}.jpg`;
+const grPath = (i: number) =>
+  `/frames/greenrivers/frame_${String(i).padStart(3, "0")}.jpg`;
+
+// Fraction of total scroll spent on each beat: the asteroid approach,
+// the breakthrough crack, then the green tunnel reveal.
+const P_SPLIT = 0.58;
+const P_TRANS = 0.06;
+
+function loadSequence(
+  count: number,
+  pathFor: (i: number) => string,
+  onFirstLoaded: () => void
+): HTMLImageElement[] {
+  const images: HTMLImageElement[] = [];
+  for (let i = 1; i <= count; i++) {
+    const img = new Image();
+    img.src = pathFor(i);
+    if (i === 1) img.onload = onFirstLoaded;
+    images[i - 1] = img;
+  }
+  return images;
+}
 
 function drawCover(
   ctx: CanvasRenderingContext2D,
@@ -13,6 +36,7 @@ function drawCover(
   width: number,
   height: number
 ) {
+  if (!img.complete || img.naturalWidth === 0) return;
   const imgRatio = img.naturalWidth / img.naturalHeight;
   const boxRatio = width / height;
   let drawWidth = width;
@@ -28,52 +52,118 @@ function drawCover(
 
   const x = (width - drawWidth) / 2;
   const y = (height - drawHeight) / 2;
-  ctx.clearRect(0, 0, width, height);
   ctx.drawImage(img, x, y, drawWidth, drawHeight);
+}
+
+// Draws `toImg` visible only through a jagged, expanding crack over
+// `fromImg` — the rock surface splitting open to reveal what's beneath.
+function drawBreakthrough(
+  ctx: CanvasRenderingContext2D,
+  fromImg: HTMLImageElement,
+  toImg: HTMLImageElement,
+  width: number,
+  height: number,
+  t: number
+) {
+  drawCover(ctx, fromImg, width, height);
+
+  const eased = t * t * (3 - 2 * t);
+  const maxRadius = Math.hypot(width, height) * 0.56;
+  const radius = eased * maxRadius;
+  const cx = width / 2;
+  const cy = height / 2;
+  const segments = 56;
+
+  ctx.save();
+  ctx.beginPath();
+  for (let i = 0; i <= segments; i++) {
+    const angle = (i / segments) * Math.PI * 2;
+    const wobble =
+      1 +
+      0.18 * Math.sin(angle * 5 + 1.3) +
+      0.12 * Math.sin(angle * 9 + 0.4) +
+      0.08 * Math.sin(angle * 13 + 2.1);
+    const r = radius * wobble;
+    const x = cx + Math.cos(angle) * r;
+    const y = cy + Math.sin(angle) * r;
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+  ctx.closePath();
+  ctx.clip();
+  drawCover(ctx, toImg, width, height);
+  ctx.restore();
+
+  const flash = Math.sin(Math.PI * Math.min(1, t * 1.15));
+  if (flash > 0) {
+    ctx.fillStyle = `rgba(180, 255, 170, ${flash * 0.35})`;
+    ctx.fillRect(0, 0, width, height);
+  }
 }
 
 export function AsteroidScrubHero() {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const imagesRef = useRef<HTMLImageElement[]>([]);
-  const frameIndexRef = useRef(0);
+  const astImagesRef = useRef<HTMLImageElement[]>([]);
+  const grImagesRef = useRef<HTMLImageElement[]>([]);
+  const progressRef = useRef(0);
+  const readyCountRef = useRef(0);
   const [ready, setReady] = useState(false);
   const [scrolled, setScrolled] = useState(false);
   const [finished, setFinished] = useState(false);
 
-  const render = (index: number) => {
+  const render = (progress: number) => {
     const canvas = canvasRef.current;
-    const img = imagesRef.current[index - 1];
-    if (!canvas || !img || !img.complete || img.naturalWidth === 0) return;
+    if (!canvas) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-    drawCover(ctx, img, canvas.width, canvas.height);
+    const { width, height } = canvas;
+    const astImages = astImagesRef.current;
+    const grImages = grImagesRef.current;
+
+    if (progress < P_SPLIT) {
+      const local = progress / P_SPLIT;
+      const idx = Math.min(
+        AST_COUNT,
+        Math.max(1, Math.round(1 + local * (AST_COUNT - 1)))
+      );
+      ctx.clearRect(0, 0, width, height);
+      drawCover(ctx, astImages[idx - 1], width, height);
+    } else if (progress < P_SPLIT + P_TRANS) {
+      const t = (progress - P_SPLIT) / P_TRANS;
+      ctx.clearRect(0, 0, width, height);
+      drawBreakthrough(
+        ctx,
+        astImages[AST_COUNT - 1],
+        grImages[0],
+        width,
+        height,
+        t
+      );
+    } else {
+      const local =
+        (progress - P_SPLIT - P_TRANS) / (1 - P_SPLIT - P_TRANS);
+      const idx = Math.min(
+        GR_COUNT,
+        Math.max(1, Math.round(1 + local * (GR_COUNT - 1)))
+      );
+      ctx.clearRect(0, 0, width, height);
+      drawCover(ctx, grImages[idx - 1], width, height);
+    }
   };
 
   useEffect(() => {
     let cancelled = false;
-    const images: HTMLImageElement[] = [];
-
-    const first = new Image();
-    first.src = framePath(1);
-    first.onload = () => {
+    const onFirstLoaded = () => {
       if (cancelled) return;
-      images[0] = first;
-      imagesRef.current = images;
-      render(1);
-      setReady(true);
+      readyCountRef.current += 1;
+      if (readyCountRef.current === 2) {
+        render(progressRef.current);
+        setReady(true);
+      }
     };
-    images[0] = first;
-
-    for (let i = 2; i <= FRAME_COUNT; i++) {
-      const img = new Image();
-      img.src = framePath(i);
-      img.onload = () => {
-        if (!cancelled && frameIndexRef.current === i) render(i);
-      };
-      images[i - 1] = img;
-    }
-    imagesRef.current = images;
+    astImagesRef.current = loadSequence(AST_COUNT, astPath, onFirstLoaded);
+    grImagesRef.current = loadSequence(GR_COUNT, grPath, onFirstLoaded);
 
     return () => {
       cancelled = true;
@@ -91,7 +181,7 @@ export function AsteroidScrubHero() {
       const rect = canvas.getBoundingClientRect();
       canvas.width = Math.round(rect.width * dpr);
       canvas.height = Math.round(rect.height * dpr);
-      render(frameIndexRef.current || 1);
+      render(progressRef.current);
     };
 
     const onScroll = () => {
@@ -99,17 +189,10 @@ export function AsteroidScrubHero() {
       const scrollable = rect.height - window.innerHeight;
       const progress =
         scrollable > 0 ? Math.min(1, Math.max(0, -rect.top / scrollable)) : 0;
-
-      const index = Math.min(
-        FRAME_COUNT,
-        Math.max(1, Math.round(1 + progress * (FRAME_COUNT - 1)))
-      );
-      if (index !== frameIndexRef.current) {
-        frameIndexRef.current = index;
-        render(index);
-      }
+      progressRef.current = progress;
+      render(progress);
       setScrolled(progress > 0.02);
-      setFinished(progress > 0.96);
+      setFinished(progress > 0.97);
     };
 
     resize();
@@ -127,7 +210,7 @@ export function AsteroidScrubHero() {
     <section
       ref={containerRef}
       className="relative bg-void"
-      style={{ height: "400vh" }}
+      style={{ height: "650vh" }}
     >
       <div className="sticky top-0 h-screen w-full overflow-hidden">
         <canvas
