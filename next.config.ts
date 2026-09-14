@@ -1,7 +1,11 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  // Image optimization cache writes get corrupted on this project's
+  // exFAT-formatted drive, so serve local images unprocessed.
+  images: {
+    unoptimized: true,
+  },
 };
 
 export default nextConfig;

@@ -25,6 +25,9 @@
 ._*
 *.pem
 
+# raw source media (not served directly; derived assets live in public/)
+/pics
+
 # debug
 npm-debug.log*
 yarn-debug.log*

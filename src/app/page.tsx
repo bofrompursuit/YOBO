@@ -1,69 +1,124 @@
 import Image from "next/image";
+import { ScrollScrubHero } from "@/components/ScrollScrubHero";
+import { Reveal } from "@/components/Reveal";
+
+const galleryFrames = [
+  { src: "/gallery/tarot.jpg", rotate: "-rotate-2" },
+  { src: "/gallery/rabbit-hole.jpg", rotate: "rotate-1" },
+  { src: "/gallery/mural-bar.jpg", rotate: "rotate-2" },
+  { src: "/gallery/garden.jpg", rotate: "-rotate-1" },
+  { src: "/gallery/bokeh.jpg", rotate: "rotate-1" },
+];
+
+const steps = [
+  {
+    n: "01",
+    title: "Arrive",
+    body: "Walk in and the city stays at the door. Every room looks like somewhere else entirely.",
+  },
+  {
+    n: "02",
+    title: "Wander",
+    body: "Follow the neon down the rabbit hole, past the mural wall, out to the garden.",
+  },
+  {
+    n: "03",
+    title: "Stay",
+    body: "Pull a card, order another round. The night moves at its own pace.",
+  },
+];
 
 export default function Home() {
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
+    <div className="flex flex-col">
+      <ScrollScrubHero />
+
+      <section className="bg-flash px-6 py-24 md:px-16 md:py-32">
+        <div className="mx-auto grid max-w-5xl gap-16 md:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)] md:gap-12">
+          <Reveal>
+            <h2 className="text-3xl font-medium text-ink md:text-4xl">
+              Step inside
+            </h2>
+            <p className="mt-5 max-w-sm text-base leading-relaxed text-mist md:text-lg">
+              Four rooms, four different moods — a neon hallway, a
+              mural-soaked bar, a hidden garden, a table where the cards get
+              read.
+            </p>
+          </Reveal>
+          <Reveal delay={0.1}>
+            <div className="grid grid-cols-3 gap-3 md:gap-4">
+              {galleryFrames.map((frame, i) => (
+                <div
+                  key={frame.src}
+                  className={`relative aspect-[4/5] overflow-hidden border border-ink/10 bg-void ${frame.rotate} ${
+                    i === 0 ? "col-span-2 row-span-2" : ""
+                  }`}
+                >
+                  <Image
+                    src={frame.src}
+                    alt=""
+                    fill
+                    sizes="(min-width: 768px) 33vw, 50vw"
+                    className="object-cover"
+                  />
+                </div>
+              ))}
+            </div>
+          </Reveal>
+        </div>
+      </section>
+
+      <section className="bg-flash px-6 pb-24 md:px-16 md:pb-32">
+        <div className="mx-auto max-w-5xl">
+          <Reveal>
+            <h2 className="max-w-md text-3xl font-medium text-ink md:text-4xl">
+              How the night unfolds
+            </h2>
+          </Reveal>
+          <div className="mt-14 grid gap-10 md:grid-cols-3 md:gap-8">
+            {steps.map((step, i) => (
+              <Reveal key={step.n} delay={i * 0.08}>
+                <div className="border-l border-ink/15 pl-6">
+                  <span className="text-sm text-mist">{step.n}</span>
+                  <h3 className="mt-2 text-xl font-medium text-ink">
+                    {step.title}
+                  </h3>
+                  <p className="mt-3 text-base leading-relaxed text-mist">
+                    {step.body}
+                  </p>
+                </div>
+              </Reveal>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="relative overflow-hidden bg-void px-6 py-28 md:px-16 md:py-40">
+        <div className="absolute inset-0 opacity-40">
+          <Image
+            src="/frames/space/frame_115.jpg"
+            alt=""
+            fill
+            sizes="100vw"
+            className="object-cover"
+          />
+        </div>
+        <div className="absolute inset-0 bg-gradient-to-t from-void via-void/70 to-void/20" />
+        <Reveal className="relative mx-auto max-w-2xl text-center">
+          <h2 className="text-3xl font-medium text-paper md:text-5xl">
+            Your next night is waiting.
+          </h2>
+          <p className="mt-5 text-base text-paper/70 md:text-lg">
+            Reserve a table and see which room finds you first.
           </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
           <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+            href="#"
+            className="mt-9 inline-flex items-center justify-center bg-coral px-7 py-3 text-base font-medium text-void transition-colors hover:bg-coral/90"
           >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
-            />
-            Deploy Now
+            Reserve a table
           </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
+        </Reveal>
+      </section>
     </div>
   );
 }
