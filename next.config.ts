@@ -6,6 +6,11 @@ const nextConfig: NextConfig = {
   images: {
     unoptimized: true,
   },
+  experimental: {
+    // Turbopack's on-disk dev cache also corrupts on exFAT
+    // ("Failed to open database" on restart) — keep it in memory only.
+    turbopackFileSystemCacheForDev: false,
+  },
 };
 
 export default nextConfig;
