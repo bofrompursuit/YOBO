@@ -111,6 +111,8 @@ export function AsteroidScrubHero() {
   const [ready, setReady] = useState(false);
   const [scrolled, setScrolled] = useState(false);
   const [finished, setFinished] = useState(false);
+  const [appsVisible, setAppsVisible] = useState(false);
+  const [toolsVisible, setToolsVisible] = useState(false);
 
   const render = (progress: number) => {
     const canvas = canvasRef.current;
@@ -193,6 +195,10 @@ export function AsteroidScrubHero() {
       render(progress);
       setScrolled(progress > 0.02);
       setFinished(progress > 0.97);
+      // "/apps" is glimpsed the instant the crack starts opening; "/tools"
+      // takes over as the nearer marker partway through the tunnel.
+      setAppsVisible(progress > P_SPLIT);
+      setToolsVisible(progress > 0.88);
     };
 
     resize();
@@ -235,6 +241,36 @@ export function AsteroidScrubHero() {
         >
           [initiate //scroll]
         </div>
+
+        <a
+          href="https://linktr.ee/bomoldenhauer?utm_source=linktree_profile_share&ltsid=044edb07-7d48-4ec0-81ad-90e9200405d5"
+          target="_blank"
+          rel="noopener noreferrer"
+          className={`absolute top-24 left-6 rounded bg-black/40 px-3 py-1.5 font-mono text-xs tracking-wider text-cyan-300 backdrop-blur-sm transition-opacity duration-700 hover:bg-black/60 md:left-14 ${
+            appsVisible ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"
+          }`}
+          style={{
+            textShadow:
+              "0 0 6px rgba(103,232,249,0.9), 0 0 18px rgba(103,232,249,0.6), 0 0 32px rgba(34,211,238,0.4)",
+          }}
+        >
+          click for //apps
+        </a>
+
+        <a
+          href="https://boportfoliov2.vercel.app/"
+          target="_blank"
+          rel="noopener noreferrer"
+          className={`absolute top-[64%] right-6 rounded bg-black/40 px-3 py-1.5 font-mono text-xs tracking-wider text-coral backdrop-blur-sm transition-opacity duration-700 hover:bg-black/60 md:right-14 ${
+            toolsVisible ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"
+          }`}
+          style={{
+            textShadow:
+              "0 0 6px rgba(255,122,104,0.9), 0 0 18px rgba(255,122,104,0.6), 0 0 32px rgba(255,122,104,0.4)",
+          }}
+        >
+          click for //tools
+        </a>
 
         <div
           className={`pointer-events-none absolute inset-x-0 bottom-14 flex justify-center transition-opacity duration-700 ${
