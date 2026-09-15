@@ -55,3 +55,13 @@ h3 {
     scroll-behavior: auto;
   }
 }
+
+@keyframes footer-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}

@@ -59,6 +59,34 @@ const PARALLAX_MAX_PX = 14;
 const PARALLAX_MAX_DEG = 0.8;
 const PARALLAX_SCALE = 1.035; // headroom so the pan never reveals an edge
 
+// Text timed to a specific timestamp *within the topography video* (not a
+// fraction of the topography scroll range), so it lands exactly on the
+// terrain -> blue wireframe transition regardless of how P_AST_END /
+// P_TOPO_END get tuned later. currentTime 1.2s is the wireframe reveal;
+// the plate clears before the camera drops into the crater at ~4.0s.
+const topoTimeToProgress = (seconds: number) =>
+  P_AST_END + (seconds / TOPO_SCRUB_SECONDS) * (P_TOPO_END - P_AST_END);
+
+const TOPO_TEXT_1_WINDOW = [
+  topoTimeToProgress(1.2),
+  topoTimeToProgress(2.5),
+] as const;
+
+// "Enter the frame." rides as a floating plate instead of sweeping across:
+// it fades in/out in place (over the first/last slice of its window) while
+// continuously bobbing, so it reads as hovering within the scene rather
+// than a banner passing through it.
+const TEXT_1_FADE_EDGE = 0.25; // fraction of its window spent fading in/out
+const TEXT_1_BOB_PX = 7;
+const TEXT_1_BOB_DEG = 0.5;
+const TEXT_1_BOB_PERIOD_S = 3.4;
+
+function fadeInOut(t: number, edge: number) {
+  if (t < edge) return t / edge;
+  if (t > 1 - edge) return (1 - t) / edge;
+  return 1;
+}
+
 type CoverSource = HTMLImageElement | HTMLVideoElement;
 
 function isVideoSource(source: CoverSource): source is HTMLVideoElement {
@@ -137,6 +165,7 @@ export function ScrollJourneyHero() {
   const topoVideoRef = useRef<HTMLVideoElement>(null);
   const cockpitVideoRef = useRef<HTMLVideoElement>(null);
   const constellationVideoRef = useRef<HTMLVideoElement>(null);
+  const topoText1Ref = useRef<HTMLDivElement>(null);
   const astImagesRef = useRef<HTMLImageElement[]>([]);
   const progressRef = useRef(0);
   const readyCountRef = useRef(0);
@@ -476,6 +505,25 @@ export function ScrollJourneyHero() {
         canvas.style.transform = `scale(${PARALLAX_SCALE}) translate(${px}px, ${py}px) rotate(${deg}deg)`;
       }
 
+      // "Enter the frame." floats in place rather than sweeping: fade it
+      // in/out across its timed window and continuously bob it, driven
+      // every frame (not just on scroll ticks) so the hover reads smooth
+      // even while the page is still.
+      const text1El = topoText1Ref.current;
+      if (text1El) {
+        const [start1, end1] = TOPO_TEXT_1_WINDOW;
+        if (progress <= start1 || progress >= end1) {
+          text1El.style.opacity = "0";
+        } else {
+          const t = (progress - start1) / (end1 - start1);
+          text1El.style.opacity = String(fadeInOut(t, TEXT_1_FADE_EDGE));
+        }
+        const phase = (performance.now() / 1000) * ((2 * Math.PI) / TEXT_1_BOB_PERIOD_S);
+        const bobY = Math.sin(phase) * TEXT_1_BOB_PX;
+        const bobDeg = Math.sin(phase * 0.6) * TEXT_1_BOB_DEG;
+        text1El.style.transform = `translate(-50%, -50%) translateY(${bobY}px) rotate(${bobDeg}deg)`;
+      }
+
       rafId = requestAnimationFrame(tick);
     };
     rafId = requestAnimationFrame(tick);
@@ -526,6 +574,27 @@ export function ScrollJourneyHero() {
           className="absolute inset-0 h-full w-full"
           aria-hidden="true"
         />
+
+        <div
+          ref={topoText1Ref}
+          className="pointer-events-none absolute top-1/2 left-1/2 whitespace-nowrap rounded-xl border px-[clamp(1rem,3vw,2.25rem)] py-[clamp(0.5rem,1.6vw,1.1rem)] font-display font-semibold"
+          style={{
+            opacity: 0,
+            transform: "translate(-50%, -50%)",
+            fontSize: "clamp(1.25rem, 4.2vw, 3rem)",
+            color: "#eafeff",
+            background:
+              "radial-gradient(closest-side, rgba(0,0,0,0.6), rgba(0,0,0,0) 100%), rgba(0,20,40,0.55)",
+            borderColor: "#00f0ff",
+            backdropFilter: "blur(6px)",
+            boxShadow:
+              "0 0 18px rgba(0,240,255,0.7), 0 0 46px rgba(0,240,255,0.4), inset 0 0 20px rgba(0,240,255,0.2)",
+            textShadow: "0 0 10px rgba(0,240,255,0.9), 0 0 26px rgba(0,240,255,0.6)",
+          }}
+        >
+          Enter the frame.
+        </div>
+
         {!ready && (
           <div className="absolute inset-0 flex items-center justify-center bg-void">
             <span className="text-sm text-mist">Loading orbit&hellip;</span>
