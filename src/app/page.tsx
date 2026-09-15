@@ -1,5 +1,5 @@
-import { AsteroidScrubHero } from "@/components/AsteroidScrubHero";
+import { ScrollJourneyHero } from "@/components/ScrollJourneyHero";
 
 export default function Home() {
-  return <AsteroidScrubHero />;
+  return <ScrollJourneyHero />;
 }
