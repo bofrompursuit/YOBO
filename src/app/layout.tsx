@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Space_Grotesk, IBM_Plex_Sans } from "next/font/google";
+import { Space_Grotesk, IBM_Plex_Sans, Orbitron } from "next/font/google";
 import { MotionConfig } from "framer-motion";
 import "./globals.css";
 
@@ -15,6 +15,12 @@ const plexSans = IBM_Plex_Sans({
   weight: ["400", "500", "600"],
 });
 
+const orbitron = Orbitron({
+  variable: "--font-hud",
+  subsets: ["latin"],
+  weight: ["500", "700"],
+});
+
 export const metadata: Metadata = {
   title: "YOBO — Some nights are worth holding onto",
   description:
@@ -25,7 +31,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
       lang="en"
-      className={`${spaceGrotesk.variable} ${plexSans.variable} antialiased`}
+      className={`${spaceGrotesk.variable} ${plexSans.variable} ${orbitron.variable} antialiased`}
     >
       <body>
         <MotionConfig reducedMotion="user">{children}</MotionConfig>

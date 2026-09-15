@@ -77,24 +77,146 @@ const PARALLAX_SCALE = 1.035; // headroom so the pan never reveals an edge
 const topoTimeToProgress = (seconds: number) =>
   P_AST_END + (seconds / TOPO_SCRUB_SECONDS) * (P_TOPO_END - P_AST_END);
 
-const TOPO_TEXT_1_WINDOW = [
-  topoTimeToProgress(1.2),
-  topoTimeToProgress(2.5),
+// HUD targeting reticle: timed to the asteroid -> topography crossfade
+// itself, while the crater surface is still plain (pre-wireframe) — not
+// the later wireframe reveal. Starts as the dissolve begins (still on the
+// asteroid's own local timeline, before topo currentTime tracking even
+// starts) and clears just before the wireframe overtakes the shot at ~1.0s.
+const HUD_RETICLE_WINDOW = [
+  P_AST_END - P_AST_FADE,
+  topoTimeToProgress(0.9),
+] as const;
+// Locked in place (no bob/drift, unlike a floating plate); the two lines
+// type on in sequence across the first slice of the window, then hold
+// fully typed (cursor still blinking) before fading out near the end.
+const HUD_FADE_EDGE = 0.08; // fraction of its window spent fading in/out
+const HUD_TYPE_PORTION = 0.55; // fraction of its window spent typing
+const HUD_LINE_1 = "//ENTERING SITE";
+const HUD_LINE_2 = "// SCANNING ACTIVITY";
+
+// Every clickable overlay below (GitHub hotspot, project pills, LinkedIn
+// CTA) shares one rule: strictly clipped to its own scroll window — hidden
+// the instant progress leaves it, from either scroll direction — and once
+// triggered, capped to a fixed real-world exposure so it never lingers
+// just because the user dwells on that part of the scene.
+function timedRevealOpacity(
+  shownAt: number | null,
+  now: number,
+  visibleMs: number,
+  fadeMs: number
+) {
+  if (shownAt === null) return 0;
+  const elapsed = now - shownAt;
+  if (elapsed < 0) return 0;
+  if (elapsed < fadeMs) return elapsed / fadeMs;
+  if (elapsed < visibleMs - fadeMs) return 1;
+  if (elapsed < visibleMs) return (visibleMs - elapsed) / fadeMs;
+  return 0;
+}
+
+// GitHub source hotspot: pinned to the thermal crater floor once the camera
+// has settled past its drop-in (~4.0s) but before topography starts
+// bridging into the cockpit scene. Timed to currentTime, not scroll
+// progress, so it always lands on the same visual regardless of how
+// P_AST_END / P_TOPO_END get retuned later.
+const TOPO_HOTSPOT_WINDOW = [
+  topoTimeToProgress(6.0),
+  topoTimeToProgress(8.0),
+] as const;
+const HOTSPOT_VISIBLE_MS = 2600;
+const HOTSPOT_FADE_MS = 300;
+
+// Project pills: scattered over the multi-blob thermal readout just before
+// the camera's drop-in, each pinned to one of its hotspots. Driven purely
+// by scroll progress (not a real-time timer) so they're 100% reliable
+// regardless of scroll speed or direction — a fast scroll-through or
+// scrolling back upward both still trace the same fade curve, with no
+// "did we catch the entry" trigger to miss. Each pill owns an overlapping
+// slice of the shared window (as fractions of it) so, scrolled through at
+// any speed, all three are guaranteed to be visible at some point, with a
+// stretch in the middle where every slice overlaps and all three show at
+// once.
+const PROJECTS_WINDOW = [
+  topoTimeToProgress(2.8),
+  topoTimeToProgress(5.0),
+] as const;
+const PROJECT_FADE_EDGE = 0.3; // fraction of each pill's own slice spent fading in/out
+const PROJECT_SLICES = [
+  [0, 0.55],
+  [0.2, 0.75],
+  [0.45, 1],
+] as const;
+const PROJECT_LINKS = [
+  {
+    id: "raivalry",
+    name: "R//AI//VALRY",
+    url: "https://rivalry-insight-engine.lovable.app/",
+    left: "82%",
+    top: "24%",
+  },
+  {
+    id: "lastonboarder",
+    name: "The Last Onboarder",
+    url: "https://lastonboarder.lovable.app/",
+    left: "20%",
+    top: "40%",
+  },
+  {
+    id: "assetify",
+    name: "assetify",
+    url: "https://serene-clad-90305952.figma.site/",
+    left: "80%",
+    top: "82%",
+  },
 ] as const;
 
-// "Enter the frame." rides as a floating plate instead of sweeping across:
-// it fades in/out in place (over the first/last slice of its window) while
-// continuously bobbing, so it reads as hovering within the scene rather
-// than a banner passing through it.
-const TEXT_1_FADE_EDGE = 0.25; // fraction of its window spent fading in/out
-const TEXT_1_BOB_PX = 7;
-const TEXT_1_BOB_DEG = 0.5;
-const TEXT_1_BOB_PERIOD_S = 3.4;
+// "Bo Moldenhauer" title card, in the asteroid approach sequence: it flips
+// in, sits flat and fully legible for roughly frames 55-69 of the
+// 120-frame sequence, then rotates away as the camera pushes past it.
+// Window given in the asteroid sequence's own local progress (0-1),
+// matching how asteroidIdx is derived from asteroidLocal in render().
+const CARD_REVEAL_LOCAL = [54 / (AST_COUNT - 1), 68 / (AST_COUNT - 1)] as const;
+const CARD_REVEAL_WINDOW = [
+  CARD_REVEAL_LOCAL[0] * P_AST_END,
+  CARD_REVEAL_LOCAL[1] * P_AST_END,
+] as const;
+// Real-world exposure, not a scroll-progress fraction: once the card's
+// window is entered the CTA holds for a fixed span, clipped the instant
+// progress leaves the window (either scroll direction), and re-arms only
+// after it's exited and re-entered.
+const CARD_CTA_VISIBLE_MS = 2600;
+const CARD_CTA_FADE_MS = 300;
 
 function fadeInOut(t: number, edge: number) {
   if (t < edge) return t / edge;
   if (t > 1 - edge) return (1 - t) / edge;
   return 1;
+}
+
+function LinkedInMark({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      className={className}
+      aria-hidden="true"
+    >
+      <path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433a2.062 2.062 0 1 1 0-4.124 2.062 2.062 0 0 1 0 4.124zM7.114 20.452H3.558V9h3.556v11.452z" />
+    </svg>
+  );
+}
+
+function GithubMark({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      fill="currentColor"
+      className={className}
+      aria-hidden="true"
+    >
+      <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z" />
+    </svg>
+  );
 }
 
 type CoverSource = HTMLImageElement | HTMLVideoElement;
@@ -209,6 +331,17 @@ export function ScrollJourneyHero() {
   const constellationVideoRef = useRef<HTMLVideoElement>(null);
   const orbVideoRef = useRef<HTMLVideoElement>(null);
   const topoText1Ref = useRef<HTMLDivElement>(null);
+  const hudLine1Ref = useRef<HTMLSpanElement>(null);
+  const hudLine2Ref = useRef<HTMLSpanElement>(null);
+  const hudCursor1Ref = useRef<HTMLSpanElement>(null);
+  const hudCursor2Ref = useRef<HTMLSpanElement>(null);
+  const hotspotRef = useRef<HTMLDivElement>(null);
+  const hotspotShownAtRef = useRef<number | null>(null);
+  const hotspotInWindowPrevRef = useRef(false);
+  const linkedInCtaRef = useRef<HTMLAnchorElement>(null);
+  const cardCtaShownAtRef = useRef<number | null>(null);
+  const cardInWindowPrevRef = useRef(false);
+  const projectPillRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const astImagesRef = useRef<HTMLImageElement[]>([]);
   const progressRef = useRef(0);
   const readyCountRef = useRef(0);
@@ -219,6 +352,10 @@ export function ScrollJourneyHero() {
 
   const [ready, setReady] = useState(false);
   const [scrolled, setScrolled] = useState(false);
+  const [activeProject, setActiveProject] = useState<{
+    label: string;
+    url: string;
+  } | null>(null);
 
   const render = () => {
     const canvas = canvasRef.current;
@@ -631,24 +768,111 @@ export function ScrollJourneyHero() {
         canvas.style.transform = `scale(${PARALLAX_SCALE}) translate(${px}px, ${py}px) rotate(${deg}deg)`;
       }
 
-      // "Enter the frame." floats in place rather than sweeping: fade it
-      // in/out across its timed window and continuously bob it, driven
-      // every frame (not just on scroll ticks) so the hover reads smooth
-      // even while the page is still.
+      // HUD targeting reticle: locked in place; types on across the first
+      // slice of its window, then holds fully typed (cursor still
+      // blinking) before fading out near the end.
       const text1El = topoText1Ref.current;
-      if (text1El) {
-        const [start1, end1] = TOPO_TEXT_1_WINDOW;
+      const line1El = hudLine1Ref.current;
+      const line2El = hudLine2Ref.current;
+      const cursor1El = hudCursor1Ref.current;
+      const cursor2El = hudCursor2Ref.current;
+      if (text1El && line1El && line2El && cursor1El && cursor2El) {
+        const [start1, end1] = HUD_RETICLE_WINDOW;
         if (progress <= start1 || progress >= end1) {
           text1El.style.opacity = "0";
         } else {
           const t = (progress - start1) / (end1 - start1);
-          text1El.style.opacity = String(fadeInOut(t, TEXT_1_FADE_EDGE));
+          text1El.style.opacity = String(fadeInOut(t, HUD_FADE_EDGE));
+
+          const typeT = Math.min(1, t / HUD_TYPE_PORTION);
+          const totalChars = HUD_LINE_1.length + HUD_LINE_2.length;
+          const charsShown = Math.round(typeT * totalChars);
+          const line1Shown = Math.min(HUD_LINE_1.length, charsShown);
+          const line2Shown = Math.min(
+            HUD_LINE_2.length,
+            Math.max(0, charsShown - HUD_LINE_1.length)
+          );
+          line1El.textContent = HUD_LINE_1.slice(0, line1Shown);
+          line2El.textContent = HUD_LINE_2.slice(0, line2Shown);
+
+          const line1Done = line1Shown >= HUD_LINE_1.length;
+          cursor1El.style.opacity = line1Done ? "0" : "";
+          cursor2El.style.opacity = line1Done ? "" : "0";
         }
-        const phase = (performance.now() / 1000) * ((2 * Math.PI) / TEXT_1_BOB_PERIOD_S);
-        const bobY = Math.sin(phase) * TEXT_1_BOB_PX;
-        const bobDeg = Math.sin(phase * 0.6) * TEXT_1_BOB_DEG;
-        text1El.style.transform = `translate(-50%, -50%) translateY(${bobY}px) rotate(${bobDeg}deg)`;
       }
+
+      // GitHub hotspot: hard-clipped to its own scroll window from either
+      // scroll direction, and once triggered, capped to a fixed real-world
+      // exposure rather than staying up for as long as the user dwells
+      // there. Re-arms only after the window is exited and re-entered.
+      const now = performance.now();
+      const hotspotEl = hotspotRef.current;
+      if (hotspotEl) {
+        const [hsStart, hsEnd] = TOPO_HOTSPOT_WINDOW;
+        const inHotspotWindow = progress > hsStart && progress < hsEnd;
+        if (inHotspotWindow && !hotspotInWindowPrevRef.current) {
+          hotspotShownAtRef.current = now;
+        }
+        if (!inHotspotWindow) {
+          hotspotShownAtRef.current = null;
+        }
+        hotspotInWindowPrevRef.current = inHotspotWindow;
+
+        const visible = timedRevealOpacity(
+          hotspotShownAtRef.current,
+          now,
+          HOTSPOT_VISIBLE_MS,
+          HOTSPOT_FADE_MS
+        );
+        hotspotEl.style.opacity = String(visible);
+        hotspotEl.style.transform = `translate(-50%, -50%) scale(${0.85 + visible * 0.15})`;
+        hotspotEl.style.pointerEvents = visible > 0.05 ? "auto" : "none";
+      }
+
+      // LinkedIn CTA: same hard-clip + fixed-exposure rule as the GitHub
+      // hotspot above, timed to the "Bo Moldenhauer" card's reveal window.
+      const ctaEl = linkedInCtaRef.current;
+      if (ctaEl) {
+        const [cardStart, cardEnd] = CARD_REVEAL_WINDOW;
+        const inCardWindow = progress > cardStart && progress < cardEnd;
+        if (inCardWindow && !cardInWindowPrevRef.current) {
+          cardCtaShownAtRef.current = now;
+        }
+        if (!inCardWindow) {
+          cardCtaShownAtRef.current = null;
+        }
+        cardInWindowPrevRef.current = inCardWindow;
+
+        const opacity = timedRevealOpacity(
+          cardCtaShownAtRef.current,
+          now,
+          CARD_CTA_VISIBLE_MS,
+          CARD_CTA_FADE_MS
+        );
+        ctaEl.style.opacity = String(opacity);
+        ctaEl.style.pointerEvents = opacity > 0.05 ? "auto" : "none";
+      }
+
+      // Project pills: driven purely by where progress currently sits in
+      // PROJECTS_WINDOW — no real-time timer to miss, so scrolling fast,
+      // slow, up, or down all reliably show (and hide) each one at the
+      // same scroll position every time.
+      const [projStart, projEnd] = PROJECTS_WINDOW;
+      const projSpan = projEnd - projStart;
+      PROJECT_LINKS.forEach((_, i) => {
+        const pillEl = projectPillRefs.current[i];
+        if (!pillEl) return;
+        const [sliceStartFrac, sliceEndFrac] = PROJECT_SLICES[i];
+        const sliceStart = projStart + sliceStartFrac * projSpan;
+        const sliceEnd = projStart + sliceEndFrac * projSpan;
+        let pillOpacity = 0;
+        if (progress > sliceStart && progress < sliceEnd) {
+          const t = (progress - sliceStart) / (sliceEnd - sliceStart);
+          pillOpacity = fadeInOut(t, PROJECT_FADE_EDGE);
+        }
+        pillEl.style.opacity = String(pillOpacity);
+        pillEl.style.pointerEvents = pillOpacity > 0.05 ? "auto" : "none";
+      });
 
       rafId = requestAnimationFrame(tick);
     };
@@ -660,6 +884,15 @@ export function ScrollJourneyHero() {
       cancelAnimationFrame(rafId);
     };
   }, []);
+
+  useEffect(() => {
+    if (!activeProject) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setActiveProject(null);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [activeProject]);
 
   return (
     <section
@@ -712,23 +945,231 @@ export function ScrollJourneyHero() {
 
         <div
           ref={topoText1Ref}
-          className="pointer-events-none absolute top-1/2 left-1/2 whitespace-nowrap rounded-xl border px-[clamp(1rem,3vw,2.25rem)] py-[clamp(0.5rem,1.6vw,1.1rem)] font-display font-semibold"
+          className="pointer-events-none absolute"
           style={{
+            left: "40%",
+            top: "26%",
             opacity: 0,
             transform: "translate(-50%, -50%)",
-            fontSize: "clamp(1.25rem, 4.2vw, 3rem)",
-            color: "#eafeff",
-            background:
-              "radial-gradient(closest-side, rgba(0,0,0,0.6), rgba(0,0,0,0) 100%), rgba(0,20,40,0.55)",
-            borderColor: "#00f0ff",
-            backdropFilter: "blur(6px)",
-            boxShadow:
-              "0 0 18px rgba(0,240,255,0.7), 0 0 46px rgba(0,240,255,0.4), inset 0 0 20px rgba(0,240,255,0.2)",
-            textShadow: "0 0 10px rgba(0,240,255,0.9), 0 0 26px rgba(0,240,255,0.6)",
           }}
         >
-          Enter the frame.
+          <div
+            className="text-left"
+            style={{
+              fontFamily: "var(--font-hud), 'Share Tech Mono', 'Courier New', monospace",
+              fontWeight: 700,
+              color: "#3fc5ff",
+              letterSpacing: "0.18em",
+              fontSize: "clamp(1.1rem, 3.4vw, 2rem)",
+              textShadow:
+                "0 0 6px #3fc5ff, 0 0 16px #3fc5ff, 0 0 32px rgba(63,197,255,0.7), 0 3px 10px rgba(0,4,20,0.95), 0 0 46px rgba(0,10,40,0.8)",
+              animation: "hud-flicker 2s ease-in-out infinite",
+            }}
+          >
+            <p className="whitespace-nowrap">
+              <span className="underline underline-offset-4">
+                <span ref={hudLine1Ref} />
+              </span>
+              <span
+                ref={hudCursor1Ref}
+                aria-hidden="true"
+                className="ml-1 inline-block align-middle"
+                style={{
+                  width: "0.2em",
+                  height: "1em",
+                  background: "#3fc5ff",
+                  boxShadow: "0 0 10px #3fc5ff, 0 2px 6px rgba(0,4,20,0.9)",
+                  animation: "terminal-cursor-blink 1s steps(1) infinite",
+                }}
+              />
+            </p>
+            <p className="mt-2 whitespace-nowrap">
+              <span className="underline underline-offset-4">
+                <span ref={hudLine2Ref} />
+              </span>
+              <span
+                ref={hudCursor2Ref}
+                aria-hidden="true"
+                className="ml-1 inline-block align-middle"
+                style={{
+                  width: "0.2em",
+                  height: "1em",
+                  background: "#3fc5ff",
+                  boxShadow: "0 0 10px #3fc5ff, 0 2px 6px rgba(0,4,20,0.9)",
+                  animation: "terminal-cursor-blink 1s steps(1) infinite",
+                }}
+              />
+            </p>
+          </div>
         </div>
+
+        {/* In-world node: pinned over the thermal crater floor, visible
+            only for the currentTime window it's timed to (see
+            TOPO_HOTSPOT_WINDOW). Positioned as a viewport-relative overlay
+            rather than projected 3D surface space, since the topography
+            shot is pre-rendered video with no live camera matrix to
+            project onto. */}
+        <div
+          ref={hotspotRef}
+          className="absolute z-20"
+          style={{
+            left: "50%",
+            top: "54%",
+            opacity: 0,
+            transform: "translate(-50%, -50%) scale(0.85)",
+            pointerEvents: "none",
+            willChange: "opacity, transform",
+          }}
+        >
+          <button
+            type="button"
+            onClick={() =>
+              setActiveProject({
+                label: "github.com/bofrompursuit",
+                url: "https://github.com/bofrompursuit",
+              })
+            }
+            className="flex items-center gap-2 whitespace-nowrap rounded-full border px-4 py-2 font-mono text-[11px] font-semibold tracking-wider backdrop-blur-md transition-transform duration-300 hover:scale-105 md:text-xs"
+            style={{
+              color: "#eafeff",
+              borderColor: "rgba(0,240,255,0.7)",
+              background:
+                "linear-gradient(135deg, rgba(0,50,70,0.55), rgba(0,12,22,0.4))",
+              boxShadow:
+                "0 0 14px rgba(0,240,255,0.55), 0 0 34px rgba(0,240,255,0.25), inset 0 0 14px rgba(0,240,255,0.15)",
+              textShadow: "0 0 8px rgba(0,240,255,0.8)",
+            }}
+          >
+            <GithubMark className="h-3.5 w-3.5 shrink-0" />
+            <span>⚡ EXPLORE SOURCE // GITHUB</span>
+          </button>
+        </div>
+
+        {/* Project pills: scattered over the multi-blob thermal readout,
+            each faded in/out purely by scroll position within its own
+            slice of PROJECTS_WINDOW (see PROJECT_SLICES). Same
+            viewport-relative positioning approach as the hotspot above. */}
+        {PROJECT_LINKS.map((project, i) => (
+          <button
+            key={project.id}
+            ref={(el) => {
+              projectPillRefs.current[i] = el;
+            }}
+            type="button"
+            onClick={() =>
+              setActiveProject({ label: project.name, url: project.url })
+            }
+            className="absolute z-20 rounded-2xl border px-4 py-2 text-center font-mono font-semibold tracking-wider backdrop-blur-md transition-transform duration-300 hover:scale-105"
+            style={{
+              left: project.left,
+              top: project.top,
+              opacity: 0,
+              transform: "translate(-50%, -50%)",
+              pointerEvents: "none",
+              willChange: "opacity",
+              color: "#eafeff",
+              borderColor: "rgba(0,240,255,0.7)",
+              background:
+                "linear-gradient(135deg, rgba(0,50,70,0.55), rgba(0,12,22,0.4))",
+              boxShadow:
+                "0 0 14px rgba(0,240,255,0.55), 0 0 34px rgba(0,240,255,0.25), inset 0 0 14px rgba(0,240,255,0.15)",
+              textShadow: "0 0 8px rgba(0,240,255,0.8)",
+            }}
+          >
+            <span className="block text-[9px] tracking-[0.25em] text-cyan-200/70">
+              CHECK OUT
+            </span>
+            <span className="block whitespace-nowrap text-[11px] md:text-xs">
+              {project.name}
+            </span>
+          </button>
+        ))}
+
+        {activeProject && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center p-6"
+            style={{ background: "rgba(2,10,16,0.75)", backdropFilter: "blur(6px)" }}
+            onClick={() => setActiveProject(null)}
+          >
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-label={`External link: ${activeProject.label}`}
+              onClick={(e) => e.stopPropagation()}
+              className="relative w-full max-w-md rounded-lg border p-6 font-mono"
+              style={{
+                borderColor: "rgba(0,240,255,0.6)",
+                background:
+                  "repeating-linear-gradient(0deg, rgba(0,240,255,0.06) 0px, rgba(0,240,255,0.06) 1px, transparent 1px, transparent 24px), repeating-linear-gradient(90deg, rgba(0,240,255,0.06) 0px, rgba(0,240,255,0.06) 1px, transparent 1px, transparent 24px), rgba(2,16,24,0.92)",
+                boxShadow:
+                  "0 0 24px rgba(0,240,255,0.35), 0 0 60px rgba(0,240,255,0.15), inset 0 0 30px rgba(0,240,255,0.08)",
+              }}
+            >
+              <span
+                className="pointer-events-none absolute -top-px -left-px h-4 w-4 border-t-2 border-l-2"
+                style={{ borderColor: "#00f0ff" }}
+              />
+              <span
+                className="pointer-events-none absolute -top-px -right-px h-4 w-4 border-t-2 border-r-2"
+                style={{ borderColor: "#00f0ff" }}
+              />
+              <span
+                className="pointer-events-none absolute -bottom-px -left-px h-4 w-4 border-b-2 border-l-2"
+                style={{ borderColor: "#00f0ff" }}
+              />
+              <span
+                className="pointer-events-none absolute -bottom-px -right-px h-4 w-4 border-b-2 border-r-2"
+                style={{ borderColor: "#00f0ff" }}
+              />
+
+              <button
+                type="button"
+                onClick={() => setActiveProject(null)}
+                className="absolute top-3 right-3 text-[11px] tracking-wider text-cyan-300 transition-opacity hover:opacity-70"
+                style={{ textShadow: "0 0 8px rgba(0,240,255,0.8)" }}
+              >
+                [X] CLOSE
+              </button>
+
+              <p className="text-[11px] tracking-[0.2em] text-cyan-400/80">
+                {"// EXTERNAL LINK DETECTED"}
+              </p>
+              <h3
+                className="mt-2 text-lg font-semibold"
+                style={{ color: "#eafeff", textShadow: "0 0 10px rgba(0,240,255,0.7)" }}
+              >
+                Explore the Source
+              </h3>
+              <p className="mt-2 break-all text-xs text-mist/80">
+                {activeProject.label}
+              </p>
+
+              <div className="mt-6 flex flex-wrap items-center gap-4">
+                <a
+                  href={activeProject.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-2 rounded border px-4 py-2 text-xs font-semibold tracking-wider transition-transform hover:scale-105"
+                  style={{
+                    color: "#031014",
+                    borderColor: "#00f0ff",
+                    background: "#00f0ff",
+                    boxShadow: "0 0 18px rgba(0,240,255,0.6)",
+                  }}
+                >
+                  OPEN LINK &#8599;
+                </a>
+                <button
+                  type="button"
+                  onClick={() => setActiveProject(null)}
+                  className="text-xs tracking-wider text-mist/70 transition-colors hover:text-cyan-300"
+                >
+                  Return to Planet YoBo
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {!ready && (
           <div className="absolute inset-0 flex items-center justify-center bg-void">
@@ -737,16 +1178,40 @@ export function ScrollJourneyHero() {
         )}
 
         <div
-          className={`pointer-events-none absolute top-1/2 right-6 -translate-y-1/2 rounded bg-black/25 px-3 py-1.5 font-mono text-xs tracking-wider text-cyan-300 backdrop-blur-sm transition-opacity duration-700 md:right-14 ${
+          className={`pointer-events-none absolute top-1/2 right-6 -translate-y-1/2 rounded bg-black/25 px-3 py-1.5 font-mono text-xs tracking-wider text-[#39ff14] backdrop-blur-sm transition-opacity duration-700 md:right-14 ${
             scrolled ? "opacity-0" : "opacity-100"
           }`}
           style={{
             textShadow:
-              "0 0 6px rgba(103,232,249,0.9), 0 0 18px rgba(103,232,249,0.6), 0 0 32px rgba(34,211,238,0.4)",
+              "0 0 6px rgba(57,255,20,0.9), 0 0 18px rgba(57,255,20,0.6), 0 0 32px rgba(57,255,20,0.4)",
           }}
         >
           [initiate //scroll]
         </div>
+
+        {/* Pinned just below-right of the "Bo Moldenhauer" title card in the
+            asteroid approach; see CARD_REVEAL_WINDOW for its timing. Fixed
+            viewport-relative percentages, same approach as the GitHub
+            hotspot above, since the card lives in pre-rendered footage with
+            no live camera matrix to project onto. */}
+        <a
+          ref={linkedInCtaRef}
+          href="https://www.linkedin.com/in/bomoldenhauer/"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="absolute z-20 flex items-center gap-1.5 rounded bg-black/25 px-3 py-1.5 font-mono text-xs tracking-wider text-[#39ff14] backdrop-blur-sm transition-transform duration-300 hover:scale-105 hover:text-white hover:shadow-[0_0_10px_rgba(57,255,20,0.85),0_0_28px_rgba(57,255,20,0.5)]"
+          style={{
+            left: "58%",
+            top: "68%",
+            opacity: 0,
+            pointerEvents: "none",
+            textShadow:
+              "0 0 6px rgba(57,255,20,0.9), 0 0 18px rgba(57,255,20,0.6), 0 0 32px rgba(57,255,20,0.4)",
+          }}
+        >
+          <LinkedInMark className="h-3 w-3" />
+          Click //LINKEDIN
+        </a>
       </div>
     </section>
   );
