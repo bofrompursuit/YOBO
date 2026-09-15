@@ -17,21 +17,47 @@ const COCKPIT_VIDEO_SRC = "/cockpit.mp4";
 // warp-in -> cockpit interior -> "DISCOVERY ALERT!" -> pull back, fade to
 // black. Scrub just short of the true end to avoid seeking past it.
 const COCKPIT_SCRUB_SECONDS = 7.9;
-// How much of the cockpit's own timeline plays out *during* the bridge
-// dissolve from the topography scene, in video-seconds.
+
+const CONSTELLATION_VIDEO_SRC = "/constellation.mp4";
+// A single point of light pulls back into a labeled star map, zooms into
+// Orion, reveals a constellation figure, then blows out to a held white
+// flash by ~9.5s. Scrub just short of the true end (10.0s).
+const CONSTELLATION_SCRUB_SECONDS = 9.7;
+
+// How much of the *incoming* scene's own timeline plays out during each
+// bridge dissolve, in video-seconds. Shared across both bridges below.
 const BRIDGE_SECONDS = 1.2;
 
-// Total scroll budget, split across the three beats. Asteroid gets 30% of
-// the first chunk (matching the old AsteroidScrubHero pacing), topography
-// gets the rest of that chunk, cockpit gets its own separate chunk, and the
-// bridge dissolve eats into the tail end of the topography chunk.
-const P_AST_END = 0.165; // asteroid approach -> topography crossfade point
-const P_AST_FADE = 0.0275; // width of that crossfade
-const P_TOPO_END = 0.55; // topography reaches its held final frame here
-const P_BRIDGE = (BRIDGE_SECONDS / COCKPIT_SCRUB_SECONDS) * (1 - P_TOPO_END);
+// Total scroll budget, split across four beats. The original asteroid ->
+// topography -> cockpit journey occupied a full 0..1 range; that whole
+// journey is now compressed into the first ORIGINAL_SHARE of a longer
+// timeline so the new constellation scene can occupy the rest, without
+// having to re-derive every fraction from scratch.
+const ORIGINAL_SHARE = 1000 / 1550;
+
+const P_AST_END = 0.165 * ORIGINAL_SHARE; // asteroid -> topography crossfade
+const P_AST_FADE = 0.0275 * ORIGINAL_SHARE; // width of that crossfade
+const P_TOPO_END = 0.55 * ORIGINAL_SHARE; // topography reaches its held final frame
+const P_BRIDGE =
+  (BRIDGE_SECONDS / COCKPIT_SCRUB_SECONDS) * (ORIGINAL_SHARE - P_TOPO_END);
 // The bridge dissolve runs *after* topography is fully settled, not by
 // eating into its own scrub, so the crater scene gets its full run first.
 const BRIDGE_END = P_TOPO_END + P_BRIDGE;
+const P_COCKPIT_END = ORIGINAL_SHARE; // cockpit reaches its held final frame here
+
+// Same "let the prior scene finish first" rule for cockpit -> constellation.
+const P_BRIDGE2 =
+  (BRIDGE_SECONDS / CONSTELLATION_SCRUB_SECONDS) * (1 - P_COCKPIT_END);
+const BRIDGE2_END = P_COCKPIT_END + P_BRIDGE2;
+
+// Mouse parallax on the cockpit view: a whole-frame drift toward the
+// cursor, not per-object depth (the footage is a flat pre-rendered video,
+// so individual props can't be moved independently). Only active while
+// fully inside the cockpit's own viewing window.
+const PARALLAX_LERP = 0.08;
+const PARALLAX_MAX_PX = 14;
+const PARALLAX_MAX_DEG = 0.8;
+const PARALLAX_SCALE = 1.035; // headroom so the pan never reveals an edge
 
 type CoverSource = HTMLImageElement | HTMLVideoElement;
 
@@ -110,10 +136,14 @@ export function ScrollJourneyHero() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const topoVideoRef = useRef<HTMLVideoElement>(null);
   const cockpitVideoRef = useRef<HTMLVideoElement>(null);
+  const constellationVideoRef = useRef<HTMLVideoElement>(null);
   const astImagesRef = useRef<HTMLImageElement[]>([]);
   const progressRef = useRef(0);
   const readyCountRef = useRef(0);
   const primedForIOSRef = useRef(false);
+  const parallaxTargetRef = useRef({ x: 0, y: 0 });
+  const parallaxSmoothRef = useRef({ x: 0, y: 0 });
+  const parallaxAppliedRef = useRef({ x: 0, y: 0 });
 
   const [ready, setReady] = useState(false);
   const [scrolled, setScrolled] = useState(false);
@@ -122,6 +152,7 @@ export function ScrollJourneyHero() {
     const canvas = canvasRef.current;
     const topoVideo = topoVideoRef.current;
     const cockpitVideo = cockpitVideoRef.current;
+    const constellationVideo = constellationVideoRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
@@ -193,12 +224,43 @@ export function ScrollJourneyHero() {
       return;
     }
 
-    // Pure cockpit phase. Topography is never drawn again past this point,
-    // so a cockpit-readiness hiccup can only hold the last good cockpit
-    // frame on screen — it can never fall back to showing topography.
-    if (!cockpitVideo || cockpitVideo.readyState < 2) return;
+    if (progress < BRIDGE2_END) {
+      // Cockpit phase, including its own bridge dissolve into the
+      // constellation scene near the very end. Same rule as before:
+      // cockpit is the only thing ever drawn here, and the incoming scene
+      // only overlays once cockpit has fully reached P_COCKPIT_END.
+      if (!cockpitVideo || cockpitVideo.readyState < 2) return;
+      ctx.clearRect(0, 0, width, height);
+      drawCover(ctx, cockpitVideo, width, height);
+
+      if (
+        progress > P_COCKPIT_END &&
+        constellationVideo &&
+        constellationVideo.readyState >= 2
+      ) {
+        const bridgeT = Math.min(
+          1,
+          Math.max(0, (progress - P_COCKPIT_END) / P_BRIDGE2)
+        );
+        const eased = bridgeT * bridgeT * (3 - 2 * bridgeT);
+        const maxRadius = Math.hypot(width, height) * 0.6;
+
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(width / 2, height / 2, eased * maxRadius, 0, Math.PI * 2);
+        ctx.clip();
+        ctx.globalCompositeOperation = "screen";
+        drawCover(ctx, constellationVideo, width, height);
+        ctx.restore();
+      }
+      return;
+    }
+
+    // Pure constellation phase. Nothing else is ever drawn again past this
+    // point, so a readiness hiccup can only hold the last good frame.
+    if (!constellationVideo || constellationVideo.readyState < 2) return;
     ctx.clearRect(0, 0, width, height);
-    drawCover(ctx, cockpitVideo, width, height);
+    drawCover(ctx, constellationVideo, width, height);
   };
 
   useEffect(() => {
@@ -206,7 +268,7 @@ export function ScrollJourneyHero() {
     const onFirstReady = () => {
       if (cancelled) return;
       readyCountRef.current += 1;
-      if (readyCountRef.current === 3) {
+      if (readyCountRef.current === 4) {
         render();
         setReady(true);
       }
@@ -216,28 +278,45 @@ export function ScrollJourneyHero() {
 
     const topoVideo = topoVideoRef.current;
     const cockpitVideo = cockpitVideoRef.current;
+    const constellationVideo = constellationVideoRef.current;
     const onTopoLoaded = () => onFirstReady();
     const onCockpitLoaded = () => onFirstReady();
+    const onConstellationLoaded = () => onFirstReady();
     topoVideo?.addEventListener("loadeddata", onTopoLoaded);
     cockpitVideo?.addEventListener("loadeddata", onCockpitLoaded);
+    constellationVideo?.addEventListener("loadeddata", onConstellationLoaded);
     topoVideo?.load();
     cockpitVideo?.load();
+    constellationVideo?.load();
 
     return () => {
       cancelled = true;
       topoVideo?.removeEventListener("loadeddata", onTopoLoaded);
       cockpitVideo?.removeEventListener("loadeddata", onCockpitLoaded);
+      constellationVideo?.removeEventListener(
+        "loadeddata",
+        onConstellationLoaded
+      );
     };
   }, []);
 
   useEffect(() => {
     const topoQueue = makeSeekQueue(topoVideoRef.current, render);
     const cockpitQueue = makeSeekQueue(cockpitVideoRef.current, render);
+    const constellationQueue = makeSeekQueue(
+      constellationVideoRef.current,
+      render
+    );
     const topoVideo = topoVideoRef.current;
     const cockpitVideo = cockpitVideoRef.current;
+    const constellationVideo = constellationVideoRef.current;
 
     topoVideo?.addEventListener("seeked", topoQueue.handleSeeked);
     cockpitVideo?.addEventListener("seeked", cockpitQueue.handleSeeked);
+    constellationVideo?.addEventListener(
+      "seeked",
+      constellationQueue.handleSeeked
+    );
 
     const canvas = canvasRef.current;
     const container = containerRef.current;
@@ -245,6 +324,10 @@ export function ScrollJourneyHero() {
       return () => {
         topoVideo?.removeEventListener("seeked", topoQueue.handleSeeked);
         cockpitVideo?.removeEventListener("seeked", cockpitQueue.handleSeeked);
+        constellationVideo?.removeEventListener(
+          "seeked",
+          constellationQueue.handleSeeked
+        );
       };
     }
 
@@ -284,6 +367,10 @@ export function ScrollJourneyHero() {
             ?.play()
             .then(() => cockpitVideo.pause())
             .catch(() => {});
+          constellationVideo
+            ?.play()
+            .then(() => constellationVideo.pause())
+            .catch(() => {});
         }
 
         if (progress >= P_AST_END) {
@@ -301,11 +388,31 @@ export function ScrollJourneyHero() {
           } else {
             const cockpitLocal = Math.min(
               1,
-              Math.max(0, (progress - BRIDGE_END) / (1 - BRIDGE_END))
+              Math.max(
+                0,
+                (progress - BRIDGE_END) / (P_COCKPIT_END - BRIDGE_END)
+              )
             );
             cockpitQueue.request(
               BRIDGE_SECONDS +
                 cockpitLocal * (COCKPIT_SCRUB_SECONDS - BRIDGE_SECONDS)
+            );
+          }
+        }
+
+        if (progress > P_COCKPIT_END) {
+          if (progress < BRIDGE2_END) {
+            const bridgeT = (progress - P_COCKPIT_END) / P_BRIDGE2;
+            constellationQueue.request(bridgeT * BRIDGE_SECONDS);
+          } else {
+            const constellationLocal = Math.min(
+              1,
+              Math.max(0, (progress - BRIDGE2_END) / (1 - BRIDGE2_END))
+            );
+            constellationQueue.request(
+              BRIDGE_SECONDS +
+                constellationLocal *
+                  (CONSTELLATION_SCRUB_SECONDS - BRIDGE_SECONDS)
             );
           }
         }
@@ -319,6 +426,64 @@ export function ScrollJourneyHero() {
       trigger.kill();
       topoVideo?.removeEventListener("seeked", topoQueue.handleSeeked);
       cockpitVideo?.removeEventListener("seeked", cockpitQueue.handleSeeked);
+      constellationVideo?.removeEventListener(
+        "seeked",
+        constellationQueue.handleSeeked
+      );
+    };
+  }, []);
+
+  useEffect(() => {
+    const onMouseMove = (e: MouseEvent) => {
+      parallaxTargetRef.current = {
+        x: (e.clientX / window.innerWidth) * 2 - 1,
+        y: (e.clientY / window.innerHeight) * 2 - 1,
+      };
+    };
+    const onMouseLeave = () => {
+      parallaxTargetRef.current = { x: 0, y: 0 };
+    };
+
+    window.addEventListener("mousemove", onMouseMove);
+    document.documentElement.addEventListener("mouseleave", onMouseLeave);
+
+    let rafId: number;
+    const tick = () => {
+      const target = parallaxTargetRef.current;
+      const smooth = parallaxSmoothRef.current;
+      smooth.x += (target.x - smooth.x) * PARALLAX_LERP;
+      smooth.y += (target.y - smooth.y) * PARALLAX_LERP;
+
+      // Only drift during the two flat-footage phases (asteroid approach,
+      // cockpit interior) and only once each has fully settled into its
+      // own viewing window; otherwise relax back toward zero so the effect
+      // never bleeds into a crossfade or the other scenes.
+      const progress = progressRef.current;
+      const inAsteroid = progress < P_AST_END - P_AST_FADE;
+      const inCockpit = progress >= BRIDGE_END && progress < P_COCKPIT_END;
+      const parallaxActive = inAsteroid || inCockpit;
+      const applied = parallaxAppliedRef.current;
+      const wantX = parallaxActive ? smooth.x : 0;
+      const wantY = parallaxActive ? smooth.y : 0;
+      applied.x += (wantX - applied.x) * PARALLAX_LERP;
+      applied.y += (wantY - applied.y) * PARALLAX_LERP;
+
+      const canvas = canvasRef.current;
+      if (canvas) {
+        const px = applied.x * PARALLAX_MAX_PX;
+        const py = applied.y * PARALLAX_MAX_PX;
+        const deg = applied.x * PARALLAX_MAX_DEG;
+        canvas.style.transform = `scale(${PARALLAX_SCALE}) translate(${px}px, ${py}px) rotate(${deg}deg)`;
+      }
+
+      rafId = requestAnimationFrame(tick);
+    };
+    rafId = requestAnimationFrame(tick);
+
+    return () => {
+      window.removeEventListener("mousemove", onMouseMove);
+      document.documentElement.removeEventListener("mouseleave", onMouseLeave);
+      cancelAnimationFrame(rafId);
     };
   }, []);
 
@@ -326,7 +491,7 @@ export function ScrollJourneyHero() {
     <section
       ref={containerRef}
       className="relative bg-void"
-      style={{ height: "1000vh" }}
+      style={{ height: "1550vh" }}
     >
       <div className="sticky top-0 h-screen w-full overflow-hidden">
         <video
@@ -341,6 +506,15 @@ export function ScrollJourneyHero() {
         <video
           ref={cockpitVideoRef}
           src={COCKPIT_VIDEO_SRC}
+          preload="auto"
+          muted
+          playsInline
+          className="sr-only"
+          aria-hidden="true"
+        />
+        <video
+          ref={constellationVideoRef}
+          src={CONSTELLATION_VIDEO_SRC}
           preload="auto"
           muted
           playsInline
