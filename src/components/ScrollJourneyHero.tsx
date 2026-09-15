@@ -24,31 +24,41 @@ const CONSTELLATION_VIDEO_SRC = "/constellation.mp4";
 // flash by ~9.5s. Scrub just short of the true end (10.0s).
 const CONSTELLATION_SCRUB_SECONDS = 9.7;
 
+const ORB_VIDEO_SRC = "/orb.mp4";
+// A robotic palm rises beneath a blazing-white orb that cools into clear
+// glass while scattered blob/shard debris gets drawn in and absorbed by
+// it. Scrub just short of the true end (3.272s).
+const ORB_SCRUB_SECONDS = 3.15;
+
 // How much of the *incoming* scene's own timeline plays out during each
-// bridge dissolve, in video-seconds. Shared across both bridges below.
+// bridge dissolve, in video-seconds. Shared across all bridges below.
 const BRIDGE_SECONDS = 1.2;
 
-// Total scroll budget, split across four beats. The original asteroid ->
-// topography -> cockpit journey occupied a full 0..1 range; that whole
-// journey is now compressed into the first ORIGINAL_SHARE of a longer
-// timeline so the new constellation scene can occupy the rest, without
-// having to re-derive every fraction from scratch.
-const ORIGINAL_SHARE = 1000 / 1550;
+// Total scroll budget, split across five beats. Each new scene has been
+// added the same way: the entire prior journey gets compressed
+// proportionally into a larger total so its own internal pacing never
+// changes, only how much of the grand total it now occupies.
+const ORIGINAL_SHARE = 1000 / 1900; // asteroid+topo+cockpit's share of the grand total
 
 const P_AST_END = 0.165 * ORIGINAL_SHARE; // asteroid -> topography crossfade
 const P_AST_FADE = 0.0275 * ORIGINAL_SHARE; // width of that crossfade
 const P_TOPO_END = 0.55 * ORIGINAL_SHARE; // topography reaches its held final frame
 const P_BRIDGE =
   (BRIDGE_SECONDS / COCKPIT_SCRUB_SECONDS) * (ORIGINAL_SHARE - P_TOPO_END);
-// The bridge dissolve runs *after* topography is fully settled, not by
-// eating into its own scrub, so the crater scene gets its full run first.
+// Every bridge below runs *after* the prior scene is fully settled, not by
+// eating into its own scrub, so each scene gets its full run first.
 const BRIDGE_END = P_TOPO_END + P_BRIDGE;
 const P_COCKPIT_END = ORIGINAL_SHARE; // cockpit reaches its held final frame here
 
-// Same "let the prior scene finish first" rule for cockpit -> constellation.
+const P_CONSTELLATION_END = 1550 / 1900; // constellation reaches its held white-flash frame here
 const P_BRIDGE2 =
-  (BRIDGE_SECONDS / CONSTELLATION_SCRUB_SECONDS) * (1 - P_COCKPIT_END);
+  (BRIDGE_SECONDS / CONSTELLATION_SCRUB_SECONDS) *
+  (P_CONSTELLATION_END - P_COCKPIT_END);
 const BRIDGE2_END = P_COCKPIT_END + P_BRIDGE2;
+
+const P_BRIDGE3 =
+  (BRIDGE_SECONDS / ORB_SCRUB_SECONDS) * (1 - P_CONSTELLATION_END);
+const BRIDGE3_END = P_CONSTELLATION_END + P_BRIDGE3;
 
 // Mouse parallax on the cockpit view: a whole-frame drift toward the
 // cursor, not per-object depth (the footage is a flat pre-rendered video,
@@ -93,16 +103,12 @@ function isVideoSource(source: CoverSource): source is HTMLVideoElement {
   return "videoWidth" in source;
 }
 
-function drawCover(
-  ctx: CanvasRenderingContext2D,
-  source: CoverSource,
+function getCoverRect(
+  sw: number,
+  sh: number,
   width: number,
   height: number
 ) {
-  const sw = isVideoSource(source) ? source.videoWidth : source.naturalWidth;
-  const sh = isVideoSource(source) ? source.videoHeight : source.naturalHeight;
-  if (!sw || !sh) return;
-
   const srcRatio = sw / sh;
   const boxRatio = width / height;
   let drawWidth = width;
@@ -116,9 +122,45 @@ function drawCover(
     drawHeight = width / srcRatio;
   }
 
-  const x = (width - drawWidth) / 2;
-  const y = (height - drawHeight) / 2;
+  return {
+    x: (width - drawWidth) / 2,
+    y: (height - drawHeight) / 2,
+    drawWidth,
+    drawHeight,
+  };
+}
+
+function drawCover(
+  ctx: CanvasRenderingContext2D,
+  source: CoverSource,
+  width: number,
+  height: number
+) {
+  const sw = isVideoSource(source) ? source.videoWidth : source.naturalWidth;
+  const sh = isVideoSource(source) ? source.videoHeight : source.naturalHeight;
+  if (!sw || !sh) return;
+  const { x, y, drawWidth, drawHeight } = getCoverRect(sw, sh, width, height);
   ctx.drawImage(source, x, y, drawWidth, drawHeight);
+}
+
+// Where the orb sits within its own source frame (not canvas space), so
+// the absorption iris can be centered exactly on it regardless of how the
+// video gets cropped to cover different viewport aspect ratios. Measured
+// directly from the source frame (connected-component centroid of the
+// brightest blob at t=0): x=0.4991, y=0.4328.
+const ORB_CENTER_X_FRAC = 0.5;
+const ORB_CENTER_Y_FRAC = 0.433;
+
+// Radius guaranteeing full coverage from an arbitrary (possibly off-center)
+// point, computed from its distance to the farthest canvas corner.
+function maxRadiusFrom(cx: number, cy: number, width: number, height: number) {
+  const corners: [number, number][] = [
+    [0, 0],
+    [width, 0],
+    [0, height],
+    [width, height],
+  ];
+  return Math.max(...corners.map(([x, y]) => Math.hypot(x - cx, y - cy)));
 }
 
 function loadImageSequence(
@@ -165,6 +207,7 @@ export function ScrollJourneyHero() {
   const topoVideoRef = useRef<HTMLVideoElement>(null);
   const cockpitVideoRef = useRef<HTMLVideoElement>(null);
   const constellationVideoRef = useRef<HTMLVideoElement>(null);
+  const orbVideoRef = useRef<HTMLVideoElement>(null);
   const topoText1Ref = useRef<HTMLDivElement>(null);
   const astImagesRef = useRef<HTMLImageElement[]>([]);
   const progressRef = useRef(0);
@@ -182,6 +225,7 @@ export function ScrollJourneyHero() {
     const topoVideo = topoVideoRef.current;
     const cockpitVideo = cockpitVideoRef.current;
     const constellationVideo = constellationVideoRef.current;
+    const orbVideo = orbVideoRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
@@ -285,11 +329,61 @@ export function ScrollJourneyHero() {
       return;
     }
 
-    // Pure constellation phase. Nothing else is ever drawn again past this
-    // point, so a readiness hiccup can only hold the last good frame.
-    if (!constellationVideo || constellationVideo.readyState < 2) return;
+    if (progress < BRIDGE3_END) {
+      // Constellation phase, including its own bridge dissolve into the
+      // orb scene near the very end. Same rule as before: constellation is
+      // the only thing ever drawn here, and the orb only overlays once
+      // constellation has fully reached its held white-flash frame.
+      if (!constellationVideo || constellationVideo.readyState < 2) return;
+      ctx.clearRect(0, 0, width, height);
+      drawCover(ctx, constellationVideo, width, height);
+
+      if (
+        progress > P_CONSTELLATION_END &&
+        orbVideo &&
+        orbVideo.readyState >= 2 &&
+        orbVideo.videoWidth &&
+        orbVideo.videoHeight
+      ) {
+        // Centered on the orb's own on-screen position (not canvas
+        // center), so the white flash reads as coalescing directly into
+        // it rather than an off-target reveal.
+        const orbRect = getCoverRect(
+          orbVideo.videoWidth,
+          orbVideo.videoHeight,
+          width,
+          height
+        );
+        const centerX = orbRect.x + ORB_CENTER_X_FRAC * orbRect.drawWidth;
+        const centerY = orbRect.y + ORB_CENTER_Y_FRAC * orbRect.drawHeight;
+
+        const bridgeT = Math.min(
+          1,
+          Math.max(0, (progress - P_CONSTELLATION_END) / P_BRIDGE3)
+        );
+        const eased = bridgeT * bridgeT * (3 - 2 * bridgeT);
+        const maxRadius = maxRadiusFrom(centerX, centerY, width, height);
+
+        // Normal compositing here, not "screen": the constellation base is
+        // blown-out white, and screen(anything, white) always renders back
+        // to white regardless of what's on top, silently hiding the orb
+        // entirely. Plain source-over lets the circle read as an actual
+        // porthole into the orb scene, swallowing the white void as it grows.
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(centerX, centerY, eased * maxRadius, 0, Math.PI * 2);
+        ctx.clip();
+        drawCover(ctx, orbVideo, width, height);
+        ctx.restore();
+      }
+      return;
+    }
+
+    // Pure orb phase. Nothing else is ever drawn again past this point, so
+    // a readiness hiccup can only hold the last good frame.
+    if (!orbVideo || orbVideo.readyState < 2) return;
     ctx.clearRect(0, 0, width, height);
-    drawCover(ctx, constellationVideo, width, height);
+    drawCover(ctx, orbVideo, width, height);
   };
 
   useEffect(() => {
@@ -297,7 +391,7 @@ export function ScrollJourneyHero() {
     const onFirstReady = () => {
       if (cancelled) return;
       readyCountRef.current += 1;
-      if (readyCountRef.current === 4) {
+      if (readyCountRef.current === 5) {
         render();
         setReady(true);
       }
@@ -308,15 +402,19 @@ export function ScrollJourneyHero() {
     const topoVideo = topoVideoRef.current;
     const cockpitVideo = cockpitVideoRef.current;
     const constellationVideo = constellationVideoRef.current;
+    const orbVideo = orbVideoRef.current;
     const onTopoLoaded = () => onFirstReady();
     const onCockpitLoaded = () => onFirstReady();
     const onConstellationLoaded = () => onFirstReady();
+    const onOrbLoaded = () => onFirstReady();
     topoVideo?.addEventListener("loadeddata", onTopoLoaded);
     cockpitVideo?.addEventListener("loadeddata", onCockpitLoaded);
     constellationVideo?.addEventListener("loadeddata", onConstellationLoaded);
+    orbVideo?.addEventListener("loadeddata", onOrbLoaded);
     topoVideo?.load();
     cockpitVideo?.load();
     constellationVideo?.load();
+    orbVideo?.load();
 
     return () => {
       cancelled = true;
@@ -326,6 +424,7 @@ export function ScrollJourneyHero() {
         "loadeddata",
         onConstellationLoaded
       );
+      orbVideo?.removeEventListener("loadeddata", onOrbLoaded);
     };
   }, []);
 
@@ -336,9 +435,11 @@ export function ScrollJourneyHero() {
       constellationVideoRef.current,
       render
     );
+    const orbQueue = makeSeekQueue(orbVideoRef.current, render);
     const topoVideo = topoVideoRef.current;
     const cockpitVideo = cockpitVideoRef.current;
     const constellationVideo = constellationVideoRef.current;
+    const orbVideo = orbVideoRef.current;
 
     topoVideo?.addEventListener("seeked", topoQueue.handleSeeked);
     cockpitVideo?.addEventListener("seeked", cockpitQueue.handleSeeked);
@@ -346,6 +447,7 @@ export function ScrollJourneyHero() {
       "seeked",
       constellationQueue.handleSeeked
     );
+    orbVideo?.addEventListener("seeked", orbQueue.handleSeeked);
 
     const canvas = canvasRef.current;
     const container = containerRef.current;
@@ -357,6 +459,7 @@ export function ScrollJourneyHero() {
           "seeked",
           constellationQueue.handleSeeked
         );
+        orbVideo?.removeEventListener("seeked", orbQueue.handleSeeked);
       };
     }
 
@@ -400,6 +503,10 @@ export function ScrollJourneyHero() {
             ?.play()
             .then(() => constellationVideo.pause())
             .catch(() => {});
+          orbVideo
+            ?.play()
+            .then(() => orbVideo.pause())
+            .catch(() => {});
         }
 
         if (progress >= P_AST_END) {
@@ -436,12 +543,30 @@ export function ScrollJourneyHero() {
           } else {
             const constellationLocal = Math.min(
               1,
-              Math.max(0, (progress - BRIDGE2_END) / (1 - BRIDGE2_END))
+              Math.max(
+                0,
+                (progress - BRIDGE2_END) / (P_CONSTELLATION_END - BRIDGE2_END)
+              )
             );
             constellationQueue.request(
               BRIDGE_SECONDS +
                 constellationLocal *
                   (CONSTELLATION_SCRUB_SECONDS - BRIDGE_SECONDS)
+            );
+          }
+        }
+
+        if (progress > P_CONSTELLATION_END) {
+          if (progress < BRIDGE3_END) {
+            const bridgeT = (progress - P_CONSTELLATION_END) / P_BRIDGE3;
+            orbQueue.request(bridgeT * BRIDGE_SECONDS);
+          } else {
+            const orbLocal = Math.min(
+              1,
+              Math.max(0, (progress - BRIDGE3_END) / (1 - BRIDGE3_END))
+            );
+            orbQueue.request(
+              BRIDGE_SECONDS + orbLocal * (ORB_SCRUB_SECONDS - BRIDGE_SECONDS)
             );
           }
         }
@@ -459,6 +584,7 @@ export function ScrollJourneyHero() {
         "seeked",
         constellationQueue.handleSeeked
       );
+      orbVideo?.removeEventListener("seeked", orbQueue.handleSeeked);
     };
   }, []);
 
@@ -539,7 +665,7 @@ export function ScrollJourneyHero() {
     <section
       ref={containerRef}
       className="relative bg-void"
-      style={{ height: "1550vh" }}
+      style={{ height: "1900vh" }}
     >
       <div className="sticky top-0 h-screen w-full overflow-hidden">
         <video
@@ -563,6 +689,15 @@ export function ScrollJourneyHero() {
         <video
           ref={constellationVideoRef}
           src={CONSTELLATION_VIDEO_SRC}
+          preload="auto"
+          muted
+          playsInline
+          className="sr-only"
+          aria-hidden="true"
+        />
+        <video
+          ref={orbVideoRef}
+          src={ORB_VIDEO_SRC}
           preload="auto"
           muted
           playsInline
