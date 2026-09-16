@@ -325,6 +325,7 @@ export function ScrollJourneyHero() {
   const cockpitVideoRef = useRef<HTMLVideoElement>(null);
   const constellationVideoRef = useRef<HTMLVideoElement>(null);
   const orbVideoRef = useRef<HTMLVideoElement>(null);
+  const constellationBufferRef = useRef<HTMLCanvasElement | null>(null);
   const topoText1Ref = useRef<HTMLDivElement>(null);
   const hudLine1Ref = useRef<HTMLSpanElement>(null);
   const hudLine2Ref = useRef<HTMLSpanElement>(null);
@@ -463,14 +464,37 @@ export function ScrollJourneyHero() {
         const shiftX = (centerX - burstX) * (1 - eased);
         const shiftY = (centerY - burstY) * (1 - eased);
 
-        ctx.save();
-        ctx.beginPath();
-        ctx.arc(centerX, centerY, eased * maxRadius, 0, Math.PI * 2);
-        ctx.clip();
-        ctx.globalCompositeOperation = "screen";
-        ctx.translate(shiftX, shiftY);
-        drawCover(ctx, constellationVideo, width, height);
-        ctx.restore();
+        // Safari/iOS frequently ignores globalCompositeOperation when the
+        // draw source is a <video> element directly — video frames are
+        // composited through a hardware path that bypasses the normal 2D
+        // blend pipeline, so "screen" silently falls back to opaque
+        // replace and the clip shows as a hard black disc. Drawing the
+        // video into an offscreen canvas first and blending *that*
+        // (canvas-to-canvas) sidesteps the bug reliably.
+        if (!constellationBufferRef.current) {
+          constellationBufferRef.current = document.createElement("canvas");
+        }
+        const buffer = constellationBufferRef.current;
+        if (buffer.width !== width || buffer.height !== height) {
+          buffer.width = width;
+          buffer.height = height;
+        }
+        const bctx = buffer.getContext("2d");
+        if (bctx) {
+          bctx.clearRect(0, 0, width, height);
+          bctx.save();
+          bctx.translate(shiftX, shiftY);
+          drawCover(bctx, constellationVideo, width, height);
+          bctx.restore();
+
+          ctx.save();
+          ctx.beginPath();
+          ctx.arc(centerX, centerY, eased * maxRadius, 0, Math.PI * 2);
+          ctx.clip();
+          ctx.globalCompositeOperation = "screen";
+          ctx.drawImage(buffer, 0, 0);
+          ctx.restore();
+        }
       }
       return;
     }
