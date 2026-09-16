@@ -26,11 +26,11 @@ const COCKPIT_SCRUB_SECONDS = 20.2;
 const COCKPIT_CENTER_X_FRAC = 945 / 1770;
 const COCKPIT_CENTER_Y_FRAC = 375 / 1180;
 
-const CONSTELLATION_VIDEO_SRC = "/constellation.mp4";
-// A single point of light pulls back into a labeled star map, zooms into
-// Orion, reveals a constellation figure, then blows out to a held white
-// flash by ~9.5s. Scrub just short of the true end (10.0s).
-const CONSTELLATION_SCRUB_SECONDS = 9.7;
+const CONSTELLATION_VIDEO_SRC = "/trip.mp4";
+// An abstract psychedelic tunnel of swirling colored light, continuously
+// morphing for its full length (no settled "held" frame). Scrub just short
+// of the true end (21.23s) to avoid seeking past it.
+const CONSTELLATION_SCRUB_SECONDS = 21.0;
 
 const ORB_VIDEO_SRC = "/orb.mp4";
 // A robotic palm rises beneath a blazing-white orb that cools into clear
@@ -325,7 +325,6 @@ export function ScrollJourneyHero() {
   const cockpitVideoRef = useRef<HTMLVideoElement>(null);
   const constellationVideoRef = useRef<HTMLVideoElement>(null);
   const orbVideoRef = useRef<HTMLVideoElement>(null);
-  const constellationBufferRef = useRef<HTMLCanvasElement | null>(null);
   const topoText1Ref = useRef<HTMLDivElement>(null);
   const hudLine1Ref = useRef<HTMLSpanElement>(null);
   const hudLine2Ref = useRef<HTMLSpanElement>(null);
@@ -420,13 +419,14 @@ export function ScrollJourneyHero() {
         constellationVideo &&
         constellationVideo.readyState >= 2 &&
         cockpitVideo.videoWidth &&
-        cockpitVideo.videoHeight &&
-        constellationVideo.videoWidth &&
-        constellationVideo.videoHeight
+        cockpitVideo.videoHeight
       ) {
         // Centered on the humanoid's chest light (in the cockpit video's
-        // own on-screen position, not canvas center), so the dissolve
-        // reads as light spilling outward from the chest.
+        // own on-screen position, not canvas center), so the reveal reads
+        // as an iris opening outward from the chest. The trip footage
+        // fills its whole frame with color (no black background/single
+        // bright point the way constellation had), so a plain clipped
+        // draw — no blend mode needed — is the right effect here.
         const cockpitRect = getCoverRect(
           cockpitVideo.videoWidth,
           cockpitVideo.videoHeight,
@@ -436,21 +436,6 @@ export function ScrollJourneyHero() {
         const centerX = cockpitRect.x + COCKPIT_CENTER_X_FRAC * cockpitRect.drawWidth;
         const centerY = cockpitRect.y + COCKPIT_CENTER_Y_FRAC * cockpitRect.drawHeight;
 
-        // The constellation footage's own bright point sits dead-center in
-        // its source frame, so a plain cover-fit draw always renders it at
-        // canvas center regardless of where the clip circle sits. Shift the
-        // whole draw so that point lands on the chest instead, or the burst
-        // stays pinned to canvas center while only the (invisible, mostly
-        // black) aperture moves.
-        const constellationRect = getCoverRect(
-          constellationVideo.videoWidth,
-          constellationVideo.videoHeight,
-          width,
-          height
-        );
-        const burstX = constellationRect.x + constellationRect.drawWidth / 2;
-        const burstY = constellationRect.y + constellationRect.drawHeight / 2;
-
         const bridgeT = Math.min(
           1,
           Math.max(0, (progress - P_COCKPIT_END) / P_BRIDGE2)
@@ -458,43 +443,12 @@ export function ScrollJourneyHero() {
         const eased = bridgeT * bridgeT * (3 - 2 * bridgeT);
         const maxRadius = maxRadiusFrom(centerX, centerY, width, height);
 
-        // Taper the shift out to zero as the bridge completes, so the burst
-        // drifts from the chest back to its normal framing and there's no
-        // pop when the next phase draws it unshifted.
-        const shiftX = (centerX - burstX) * (1 - eased);
-        const shiftY = (centerY - burstY) * (1 - eased);
-
-        // Safari/iOS frequently ignores globalCompositeOperation when the
-        // draw source is a <video> element directly — video frames are
-        // composited through a hardware path that bypasses the normal 2D
-        // blend pipeline, so "screen" silently falls back to opaque
-        // replace and the clip shows as a hard black disc. Drawing the
-        // video into an offscreen canvas first and blending *that*
-        // (canvas-to-canvas) sidesteps the bug reliably.
-        if (!constellationBufferRef.current) {
-          constellationBufferRef.current = document.createElement("canvas");
-        }
-        const buffer = constellationBufferRef.current;
-        if (buffer.width !== width || buffer.height !== height) {
-          buffer.width = width;
-          buffer.height = height;
-        }
-        const bctx = buffer.getContext("2d");
-        if (bctx) {
-          bctx.clearRect(0, 0, width, height);
-          bctx.save();
-          bctx.translate(shiftX, shiftY);
-          drawCover(bctx, constellationVideo, width, height);
-          bctx.restore();
-
-          ctx.save();
-          ctx.beginPath();
-          ctx.arc(centerX, centerY, eased * maxRadius, 0, Math.PI * 2);
-          ctx.clip();
-          ctx.globalCompositeOperation = "screen";
-          ctx.drawImage(buffer, 0, 0);
-          ctx.restore();
-        }
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(centerX, centerY, eased * maxRadius, 0, Math.PI * 2);
+        ctx.clip();
+        drawCover(ctx, constellationVideo, width, height);
+        ctx.restore();
       }
       return;
     }
