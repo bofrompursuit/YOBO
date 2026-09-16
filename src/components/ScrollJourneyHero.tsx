@@ -13,10 +13,18 @@ const TOPO_VIDEO_SRC = "/3D Topography.mp4";
 // cleared the rim and the shot settles into a held, static starfield.
 const TOPO_SCRUB_SECONDS = 9.3;
 
-const COCKPIT_VIDEO_SRC = "/cockpit.mp4";
+const COCKPIT_VIDEO_SRC = "/clouds.mp4";
 // warp-in -> cockpit interior -> "DISCOVERY ALERT!" -> pull back, fade to
 // black. Scrub just short of the true end to avoid seeking past it.
-const COCKPIT_SCRUB_SECONDS = 7.9;
+const COCKPIT_SCRUB_SECONDS = 20.2;
+
+// Where the humanoid's chest light sits within the cockpit/clouds video's
+// own source frame (not canvas space), so the constellation dissolve can
+// be centered exactly on it regardless of how the video gets cropped to
+// cover different viewport aspect ratios. Measured directly from the held
+// final frame.
+const COCKPIT_CENTER_X_FRAC = 945 / 1770;
+const COCKPIT_CENTER_Y_FRAC = 375 / 1180;
 
 const CONSTELLATION_VIDEO_SRC = "/constellation.mp4";
 // A single point of light pulls back into a labeled star map, zooms into
@@ -43,11 +51,7 @@ const ORIGINAL_SHARE = 1000 / 1900; // asteroid+topo+cockpit's share of the gran
 const P_AST_END = 0.165 * ORIGINAL_SHARE; // asteroid -> topography crossfade
 const P_AST_FADE = 0.0275 * ORIGINAL_SHARE; // width of that crossfade
 const P_TOPO_END = 0.55 * ORIGINAL_SHARE; // topography reaches its held final frame
-const P_BRIDGE =
-  (BRIDGE_SECONDS / COCKPIT_SCRUB_SECONDS) * (ORIGINAL_SHARE - P_TOPO_END);
-// Every bridge below runs *after* the prior scene is fully settled, not by
-// eating into its own scrub, so each scene gets its full run first.
-const BRIDGE_END = P_TOPO_END + P_BRIDGE;
+// Topography cuts straight to cockpit/clouds at P_TOPO_END — no dissolve.
 const P_COCKPIT_END = ORIGINAL_SHARE; // cockpit reaches its held final frame here
 
 const P_CONSTELLATION_END = 1550 / 1900; // constellation reaches its held white-flash frame here
@@ -56,9 +60,8 @@ const P_BRIDGE2 =
   (P_CONSTELLATION_END - P_COCKPIT_END);
 const BRIDGE2_END = P_COCKPIT_END + P_BRIDGE2;
 
-const P_BRIDGE3 =
-  (BRIDGE_SECONDS / ORB_SCRUB_SECONDS) * (1 - P_CONSTELLATION_END);
-const BRIDGE3_END = P_CONSTELLATION_END + P_BRIDGE3;
+// Constellation cuts straight to the orb/robot-hand scene at
+// P_CONSTELLATION_END — no dissolve.
 
 // Mouse parallax on the cockpit view: a whole-frame drift toward the
 // cursor, not per-object depth (the footage is a flat pre-rendered video,
@@ -265,14 +268,6 @@ function drawCover(
   ctx.drawImage(source, x, y, drawWidth, drawHeight);
 }
 
-// Where the orb sits within its own source frame (not canvas space), so
-// the absorption iris can be centered exactly on it regardless of how the
-// video gets cropped to cover different viewport aspect ratios. Measured
-// directly from the source frame (connected-component centroid of the
-// brightest blob at t=0): x=0.4991, y=0.4328.
-const ORB_CENTER_X_FRAC = 0.5;
-const ORB_CENTER_Y_FRAC = 0.433;
-
 // Radius guaranteeing full coverage from an arbitrary (possibly off-center)
 // point, computed from its distance to the farthest canvas corner.
 function maxRadiusFrom(cx: number, cy: number, width: number, height: number) {
@@ -401,36 +396,12 @@ export function ScrollJourneyHero() {
       return;
     }
 
-    if (progress < BRIDGE_END) {
-      // Topography phase, including the bridge dissolve near its very end.
-      // Topography is the only thing ever drawn here; if the cockpit video
-      // isn't ready yet for its overlay, we simply skip the overlay for
-      // this frame rather than showing nothing.
+    if (progress < P_TOPO_END) {
+      // Topography phase. Topography is the only thing ever drawn here; it
+      // cuts straight to the cockpit/clouds scene at P_TOPO_END.
       if (!topoVideo || topoVideo.readyState < 2) return;
       ctx.clearRect(0, 0, width, height);
       drawCover(ctx, topoVideo, width, height);
-
-      if (progress > P_TOPO_END && cockpitVideo && cockpitVideo.readyState >= 2) {
-        // Bridge dissolve: the topography video's held final frame (drawn
-        // above as the base layer) bleeds into the cockpit video through a
-        // growing iris mask, screen-blended so bright edges glow through
-        // instead of just cutting a hard-edged hole. Starts only once
-        // topography has fully reached P_TOPO_END, never before.
-        const bridgeT = Math.min(
-          1,
-          Math.max(0, (progress - P_TOPO_END) / P_BRIDGE)
-        );
-        const eased = bridgeT * bridgeT * (3 - 2 * bridgeT);
-        const maxRadius = Math.hypot(width, height) * 0.6;
-
-        ctx.save();
-        ctx.beginPath();
-        ctx.arc(width / 2, height / 2, eased * maxRadius, 0, Math.PI * 2);
-        ctx.clip();
-        ctx.globalCompositeOperation = "screen";
-        drawCover(ctx, cockpitVideo, width, height);
-        ctx.restore();
-      }
       return;
     }
 
@@ -446,73 +417,71 @@ export function ScrollJourneyHero() {
       if (
         progress > P_COCKPIT_END &&
         constellationVideo &&
-        constellationVideo.readyState >= 2
+        constellationVideo.readyState >= 2 &&
+        cockpitVideo.videoWidth &&
+        cockpitVideo.videoHeight &&
+        constellationVideo.videoWidth &&
+        constellationVideo.videoHeight
       ) {
+        // Centered on the humanoid's chest light (in the cockpit video's
+        // own on-screen position, not canvas center), so the dissolve
+        // reads as light spilling outward from the chest.
+        const cockpitRect = getCoverRect(
+          cockpitVideo.videoWidth,
+          cockpitVideo.videoHeight,
+          width,
+          height
+        );
+        const centerX = cockpitRect.x + COCKPIT_CENTER_X_FRAC * cockpitRect.drawWidth;
+        const centerY = cockpitRect.y + COCKPIT_CENTER_Y_FRAC * cockpitRect.drawHeight;
+
+        // The constellation footage's own bright point sits dead-center in
+        // its source frame, so a plain cover-fit draw always renders it at
+        // canvas center regardless of where the clip circle sits. Shift the
+        // whole draw so that point lands on the chest instead, or the burst
+        // stays pinned to canvas center while only the (invisible, mostly
+        // black) aperture moves.
+        const constellationRect = getCoverRect(
+          constellationVideo.videoWidth,
+          constellationVideo.videoHeight,
+          width,
+          height
+        );
+        const burstX = constellationRect.x + constellationRect.drawWidth / 2;
+        const burstY = constellationRect.y + constellationRect.drawHeight / 2;
+
         const bridgeT = Math.min(
           1,
           Math.max(0, (progress - P_COCKPIT_END) / P_BRIDGE2)
         );
         const eased = bridgeT * bridgeT * (3 - 2 * bridgeT);
-        const maxRadius = Math.hypot(width, height) * 0.6;
+        const maxRadius = maxRadiusFrom(centerX, centerY, width, height);
+
+        // Taper the shift out to zero as the bridge completes, so the burst
+        // drifts from the chest back to its normal framing and there's no
+        // pop when the next phase draws it unshifted.
+        const shiftX = (centerX - burstX) * (1 - eased);
+        const shiftY = (centerY - burstY) * (1 - eased);
 
         ctx.save();
         ctx.beginPath();
-        ctx.arc(width / 2, height / 2, eased * maxRadius, 0, Math.PI * 2);
+        ctx.arc(centerX, centerY, eased * maxRadius, 0, Math.PI * 2);
         ctx.clip();
         ctx.globalCompositeOperation = "screen";
+        ctx.translate(shiftX, shiftY);
         drawCover(ctx, constellationVideo, width, height);
         ctx.restore();
       }
       return;
     }
 
-    if (progress < BRIDGE3_END) {
-      // Constellation phase, including its own bridge dissolve into the
-      // orb scene near the very end. Same rule as before: constellation is
-      // the only thing ever drawn here, and the orb only overlays once
-      // constellation has fully reached its held white-flash frame.
+    if (progress < P_CONSTELLATION_END) {
+      // Constellation phase. Constellation is the only thing ever drawn
+      // here; it cuts straight to the orb/robot-hand scene at
+      // P_CONSTELLATION_END.
       if (!constellationVideo || constellationVideo.readyState < 2) return;
       ctx.clearRect(0, 0, width, height);
       drawCover(ctx, constellationVideo, width, height);
-
-      if (
-        progress > P_CONSTELLATION_END &&
-        orbVideo &&
-        orbVideo.readyState >= 2 &&
-        orbVideo.videoWidth &&
-        orbVideo.videoHeight
-      ) {
-        // Centered on the orb's own on-screen position (not canvas
-        // center), so the white flash reads as coalescing directly into
-        // it rather than an off-target reveal.
-        const orbRect = getCoverRect(
-          orbVideo.videoWidth,
-          orbVideo.videoHeight,
-          width,
-          height
-        );
-        const centerX = orbRect.x + ORB_CENTER_X_FRAC * orbRect.drawWidth;
-        const centerY = orbRect.y + ORB_CENTER_Y_FRAC * orbRect.drawHeight;
-
-        const bridgeT = Math.min(
-          1,
-          Math.max(0, (progress - P_CONSTELLATION_END) / P_BRIDGE3)
-        );
-        const eased = bridgeT * bridgeT * (3 - 2 * bridgeT);
-        const maxRadius = maxRadiusFrom(centerX, centerY, width, height);
-
-        // Normal compositing here, not "screen": the constellation base is
-        // blown-out white, and screen(anything, white) always renders back
-        // to white regardless of what's on top, silently hiding the orb
-        // entirely. Plain source-over lets the circle read as an actual
-        // porthole into the orb scene, swallowing the white void as it grows.
-        ctx.save();
-        ctx.beginPath();
-        ctx.arc(centerX, centerY, eased * maxRadius, 0, Math.PI * 2);
-        ctx.clip();
-        drawCover(ctx, orbVideo, width, height);
-        ctx.restore();
-      }
       return;
     }
 
@@ -655,22 +624,11 @@ export function ScrollJourneyHero() {
         }
 
         if (progress > P_TOPO_END) {
-          if (progress < BRIDGE_END) {
-            const bridgeT = (progress - P_TOPO_END) / P_BRIDGE;
-            cockpitQueue.request(bridgeT * BRIDGE_SECONDS);
-          } else {
-            const cockpitLocal = Math.min(
-              1,
-              Math.max(
-                0,
-                (progress - BRIDGE_END) / (P_COCKPIT_END - BRIDGE_END)
-              )
-            );
-            cockpitQueue.request(
-              BRIDGE_SECONDS +
-                cockpitLocal * (COCKPIT_SCRUB_SECONDS - BRIDGE_SECONDS)
-            );
-          }
+          const cockpitLocal = Math.min(
+            1,
+            Math.max(0, (progress - P_TOPO_END) / (P_COCKPIT_END - P_TOPO_END))
+          );
+          cockpitQueue.request(cockpitLocal * COCKPIT_SCRUB_SECONDS);
         }
 
         if (progress > P_COCKPIT_END) {
@@ -694,18 +652,14 @@ export function ScrollJourneyHero() {
         }
 
         if (progress > P_CONSTELLATION_END) {
-          if (progress < BRIDGE3_END) {
-            const bridgeT = (progress - P_CONSTELLATION_END) / P_BRIDGE3;
-            orbQueue.request(bridgeT * BRIDGE_SECONDS);
-          } else {
-            const orbLocal = Math.min(
-              1,
-              Math.max(0, (progress - BRIDGE3_END) / (1 - BRIDGE3_END))
-            );
-            orbQueue.request(
-              BRIDGE_SECONDS + orbLocal * (ORB_SCRUB_SECONDS - BRIDGE_SECONDS)
-            );
-          }
+          const orbLocal = Math.min(
+            1,
+            Math.max(
+              0,
+              (progress - P_CONSTELLATION_END) / (1 - P_CONSTELLATION_END)
+            )
+          );
+          orbQueue.request(orbLocal * ORB_SCRUB_SECONDS);
         }
 
         render();
@@ -752,7 +706,7 @@ export function ScrollJourneyHero() {
       // never bleeds into a crossfade or the other scenes.
       const progress = progressRef.current;
       const inAsteroid = progress < P_AST_END - P_AST_FADE;
-      const inCockpit = progress >= BRIDGE_END && progress < P_COCKPIT_END;
+      const inCockpit = progress >= P_TOPO_END && progress < P_COCKPIT_END;
       const parallaxActive = inAsteroid || inCockpit;
       const applied = parallaxAppliedRef.current;
       const wantX = parallaxActive ? smooth.x : 0;
