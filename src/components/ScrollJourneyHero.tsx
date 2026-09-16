@@ -18,14 +18,6 @@ const COCKPIT_VIDEO_SRC = "/clouds.mp4";
 // black. Scrub just short of the true end to avoid seeking past it.
 const COCKPIT_SCRUB_SECONDS = 20.2;
 
-// Where the humanoid's chest light sits within the cockpit/clouds video's
-// own source frame (not canvas space), so the constellation dissolve can
-// be centered exactly on it regardless of how the video gets cropped to
-// cover different viewport aspect ratios. Measured directly from the held
-// final frame.
-const COCKPIT_CENTER_X_FRAC = 945 / 1770;
-const COCKPIT_CENTER_Y_FRAC = 375 / 1180;
-
 const CONSTELLATION_VIDEO_SRC = "/trip.mp4";
 // An abstract psychedelic tunnel of swirling colored light, continuously
 // morphing for its full length (no settled "held" frame). Scrub just short
@@ -268,18 +260,6 @@ function drawCover(
   ctx.drawImage(source, x, y, drawWidth, drawHeight);
 }
 
-// Radius guaranteeing full coverage from an arbitrary (possibly off-center)
-// point, computed from its distance to the farthest canvas corner.
-function maxRadiusFrom(cx: number, cy: number, width: number, height: number) {
-  const corners: [number, number][] = [
-    [0, 0],
-    [width, 0],
-    [0, height],
-    [width, height],
-  ];
-  return Math.max(...corners.map(([x, y]) => Math.hypot(x - cx, y - cy)));
-}
-
 function loadImageSequence(
   count: number,
   pathFor: (i: number) => string,
@@ -417,36 +397,18 @@ export function ScrollJourneyHero() {
       if (
         progress > P_COCKPIT_END &&
         constellationVideo &&
-        constellationVideo.readyState >= 2 &&
-        cockpitVideo.videoWidth &&
-        cockpitVideo.videoHeight
+        constellationVideo.readyState >= 2
       ) {
-        // Centered on the humanoid's chest light (in the cockpit video's
-        // own on-screen position, not canvas center), so the reveal reads
-        // as an iris opening outward from the chest. The trip footage
-        // fills its whole frame with color (no black background/single
-        // bright point the way constellation had), so a plain clipped
-        // draw — no blend mode needed — is the right effect here.
-        const cockpitRect = getCoverRect(
-          cockpitVideo.videoWidth,
-          cockpitVideo.videoHeight,
-          width,
-          height
-        );
-        const centerX = cockpitRect.x + COCKPIT_CENTER_X_FRAC * cockpitRect.drawWidth;
-        const centerY = cockpitRect.y + COCKPIT_CENTER_Y_FRAC * cockpitRect.drawHeight;
-
+        // Plain full-frame crossfade into the trip footage — no iris/clip
+        // shape, just a natural dissolve.
         const bridgeT = Math.min(
           1,
           Math.max(0, (progress - P_COCKPIT_END) / P_BRIDGE2)
         );
         const eased = bridgeT * bridgeT * (3 - 2 * bridgeT);
-        const maxRadius = maxRadiusFrom(centerX, centerY, width, height);
 
         ctx.save();
-        ctx.beginPath();
-        ctx.arc(centerX, centerY, eased * maxRadius, 0, Math.PI * 2);
-        ctx.clip();
+        ctx.globalAlpha = eased;
         drawCover(ctx, constellationVideo, width, height);
         ctx.restore();
       }
