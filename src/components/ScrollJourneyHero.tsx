@@ -13,16 +13,22 @@ const TOPO_VIDEO_SRC = "/3D Topography.mp4";
 // cleared the rim and the shot settles into a held, static starfield.
 const TOPO_SCRUB_SECONDS = 9.3;
 
+const HOLE_VIDEO_SRC = "/hole.mp4";
+// A continuously-morphing burning wormhole tunnel, no settled "held" frame
+// (same character as the constellation footage below). Trimmed to a 9s
+// clip; scrub just short of the true end to avoid seeking past it.
+const HOLE_SCRUB_SECONDS = 8.8;
+
 const COCKPIT_VIDEO_SRC = "/clouds.mp4";
 // warp-in -> cockpit interior -> "DISCOVERY ALERT!" -> pull back, fade to
 // black. Scrub just short of the true end to avoid seeking past it.
 const COCKPIT_SCRUB_SECONDS = 20.2;
 
-const CONSTELLATION_VIDEO_SRC = "/trip.mp4";
-// An abstract psychedelic tunnel of swirling colored light, continuously
-// morphing for its full length (no settled "held" frame). Scrub just short
-// of the true end (21.23s) to avoid seeking past it.
-const CONSTELLATION_SCRUB_SECONDS = 21.0;
+const CONSTELLATION_VIDEO_SRC = "/triangle.mp4";
+// A tumbling geometric triangle tunnel, continuously morphing for its full
+// length (no settled "held" frame). Scrub just short of the true end
+// (20.03s) to avoid seeking past it.
+const CONSTELLATION_SCRUB_SECONDS = 19.8;
 
 const ORB_VIDEO_SRC = "/orb.mp4";
 // A robotic palm rises beneath a blazing-white orb that cools into clear
@@ -34,19 +40,37 @@ const ORB_SCRUB_SECONDS = 3.15;
 // bridge dissolve, in video-seconds. Shared across all bridges below.
 const BRIDGE_SECONDS = 1.2;
 
-// Total scroll budget, split across five beats. Each new scene has been
-// added the same way: the entire prior journey gets compressed
-// proportionally into a larger total so its own internal pacing never
-// changes, only how much of the grand total it now occupies.
-const ORIGINAL_SHARE = 1000 / 1900; // asteroid+topo+cockpit's share of the grand total
+// Total scroll budget, split across six beats. Each new scene has been
+// added the same way: every scene keeps its own vh footprint fixed (so its
+// scroll pacing, vh per video-second, never changes) while the grand total
+// simply grows to fit it in. Expressing everything as vh-so-far below,
+// rather than juggling fractions directly, makes it possible to insert a
+// scene in the *middle* of the sequence (hole, between topo and cockpit)
+// the same way earlier scenes were appended at the end.
+const AST_VH = 165; // asteroid approach, plus its crossfade into topo
+const AST_FADE_VH = 27.5; // width of that crossfade
+const TOPO_VH = 385; // topography's own scrub footprint
+const HOLE_VH = 230; // hole.mp4's own scrub footprint
+const COCKPIT_VH = 450; // cockpit/clouds' own scrub footprint
+const CONSTELLATION_VH = 550; // constellation's own scrub footprint
+const ORB_VH = 350; // orb/robot-hand's own scrub footprint
 
-const P_AST_END = 0.165 * ORIGINAL_SHARE; // asteroid -> topography crossfade
-const P_AST_FADE = 0.0275 * ORIGINAL_SHARE; // width of that crossfade
-const P_TOPO_END = 0.55 * ORIGINAL_SHARE; // topography reaches its held final frame
-// Topography cuts straight to cockpit/clouds at P_TOPO_END — no dissolve.
-const P_COCKPIT_END = ORIGINAL_SHARE; // cockpit reaches its held final frame here
+const AST_END_VH = AST_VH;
+const TOPO_END_VH = AST_END_VH + TOPO_VH;
+const HOLE_END_VH = TOPO_END_VH + HOLE_VH;
+const COCKPIT_END_VH = HOLE_END_VH + COCKPIT_VH;
+const CONSTELLATION_END_VH = COCKPIT_END_VH + CONSTELLATION_VH;
+const GRAND_TOTAL_VH = CONSTELLATION_END_VH + ORB_VH;
 
-const P_CONSTELLATION_END = 1550 / 1900; // constellation reaches its held white-flash frame here
+const P_AST_END = AST_END_VH / GRAND_TOTAL_VH; // asteroid -> topography crossfade
+const P_AST_FADE = AST_FADE_VH / GRAND_TOTAL_VH; // width of that crossfade
+const P_TOPO_END = TOPO_END_VH / GRAND_TOTAL_VH; // topography reaches its held final frame
+// Topography cuts straight to the hole scene at P_TOPO_END — no dissolve.
+const P_HOLE_END = HOLE_END_VH / GRAND_TOTAL_VH; // hole scrub finishes
+// Hole cuts straight to cockpit/clouds at P_HOLE_END — no dissolve.
+const P_COCKPIT_END = COCKPIT_END_VH / GRAND_TOTAL_VH; // cockpit reaches its held final frame here
+
+const P_CONSTELLATION_END = CONSTELLATION_END_VH / GRAND_TOTAL_VH; // constellation's scrub ends here, cutting to the orb scene
 const P_BRIDGE2 =
   (BRIDGE_SECONDS / CONSTELLATION_SCRUB_SECONDS) *
   (P_CONSTELLATION_END - P_COCKPIT_END);
@@ -302,6 +326,7 @@ export function ScrollJourneyHero() {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const topoVideoRef = useRef<HTMLVideoElement>(null);
+  const holeVideoRef = useRef<HTMLVideoElement>(null);
   const cockpitVideoRef = useRef<HTMLVideoElement>(null);
   const constellationVideoRef = useRef<HTMLVideoElement>(null);
   const orbVideoRef = useRef<HTMLVideoElement>(null);
@@ -335,6 +360,7 @@ export function ScrollJourneyHero() {
   const render = () => {
     const canvas = canvasRef.current;
     const topoVideo = topoVideoRef.current;
+    const holeVideo = holeVideoRef.current;
     const cockpitVideo = cockpitVideoRef.current;
     const constellationVideo = constellationVideoRef.current;
     const orbVideo = orbVideoRef.current;
@@ -378,39 +404,63 @@ export function ScrollJourneyHero() {
 
     if (progress < P_TOPO_END) {
       // Topography phase. Topography is the only thing ever drawn here; it
-      // cuts straight to the cockpit/clouds scene at P_TOPO_END.
+      // cuts straight to the hole scene at P_TOPO_END.
       if (!topoVideo || topoVideo.readyState < 2) return;
       ctx.clearRect(0, 0, width, height);
       drawCover(ctx, topoVideo, width, height);
       return;
     }
 
+    if (progress < P_HOLE_END) {
+      // Hole phase. Hole is the only thing ever drawn here; it cuts
+      // straight to the cockpit/clouds scene at P_HOLE_END.
+      if (!holeVideo || holeVideo.readyState < 2) return;
+      ctx.clearRect(0, 0, width, height);
+      drawCover(ctx, holeVideo, width, height);
+      return;
+    }
+
     if (progress < BRIDGE2_END) {
-      // Cockpit phase, including its own bridge dissolve into the
-      // constellation scene near the very end. Same rule as before:
-      // cockpit is the only thing ever drawn here, and the incoming scene
-      // only overlays once cockpit has fully reached P_COCKPIT_END.
+      // Cockpit phase, including its own bridge into the constellation
+      // scene near the very end. Same rule as before: cockpit is the only
+      // thing ever drawn here, and the incoming scene only overlays once
+      // cockpit has fully reached P_COCKPIT_END.
       if (!cockpitVideo || cockpitVideo.readyState < 2) return;
       ctx.clearRect(0, 0, width, height);
       drawCover(ctx, cockpitVideo, width, height);
 
-      if (
-        progress > P_COCKPIT_END &&
-        constellationVideo &&
-        constellationVideo.readyState >= 2
-      ) {
-        // Plain full-frame crossfade into the trip footage — no iris/clip
-        // shape, just a natural dissolve.
+      if (progress > P_COCKPIT_END) {
+        // Dip to black, then fade the incoming scene in from black — a
+        // proper "fade out / fade in" rather than a direct crossfade,
+        // playing off clouds' own fade-to-black ending instead of dissolving
+        // straight into the next scene's pixels. First half of the window
+        // fades cockpit out under solid black; second half fades
+        // constellation in on top of that black.
         const bridgeT = Math.min(
           1,
           Math.max(0, (progress - P_COCKPIT_END) / P_BRIDGE2)
         );
-        const eased = bridgeT * bridgeT * (3 - 2 * bridgeT);
+        const toBlackT = Math.min(1, bridgeT / 0.5);
+        const easedToBlack = toBlackT * toBlackT * (3 - 2 * toBlackT);
 
         ctx.save();
-        ctx.globalAlpha = eased;
-        drawCover(ctx, constellationVideo, width, height);
+        ctx.globalAlpha = easedToBlack;
+        ctx.fillStyle = "#000";
+        ctx.fillRect(0, 0, width, height);
         ctx.restore();
+
+        const fromBlackT = Math.max(0, (bridgeT - 0.5) / 0.5);
+        if (
+          fromBlackT > 0 &&
+          constellationVideo &&
+          constellationVideo.readyState >= 2
+        ) {
+          const easedFromBlack = fromBlackT * fromBlackT * (3 - 2 * fromBlackT);
+          ctx.save();
+          ctx.globalAlpha = easedFromBlack;
+          drawCover(ctx, constellationVideo, width, height);
+          ctx.restore();
+        }
       }
       return;
     }
@@ -437,7 +487,7 @@ export function ScrollJourneyHero() {
     const onFirstReady = () => {
       if (cancelled) return;
       readyCountRef.current += 1;
-      if (readyCountRef.current === 5) {
+      if (readyCountRef.current === 6) {
         render();
         setReady(true);
       }
@@ -446,18 +496,22 @@ export function ScrollJourneyHero() {
     astImagesRef.current = loadImageSequence(AST_COUNT, astPath, onFirstReady);
 
     const topoVideo = topoVideoRef.current;
+    const holeVideo = holeVideoRef.current;
     const cockpitVideo = cockpitVideoRef.current;
     const constellationVideo = constellationVideoRef.current;
     const orbVideo = orbVideoRef.current;
     const onTopoLoaded = () => onFirstReady();
+    const onHoleLoaded = () => onFirstReady();
     const onCockpitLoaded = () => onFirstReady();
     const onConstellationLoaded = () => onFirstReady();
     const onOrbLoaded = () => onFirstReady();
     topoVideo?.addEventListener("loadeddata", onTopoLoaded);
+    holeVideo?.addEventListener("loadeddata", onHoleLoaded);
     cockpitVideo?.addEventListener("loadeddata", onCockpitLoaded);
     constellationVideo?.addEventListener("loadeddata", onConstellationLoaded);
     orbVideo?.addEventListener("loadeddata", onOrbLoaded);
     topoVideo?.load();
+    holeVideo?.load();
     cockpitVideo?.load();
     constellationVideo?.load();
     orbVideo?.load();
@@ -465,6 +519,7 @@ export function ScrollJourneyHero() {
     return () => {
       cancelled = true;
       topoVideo?.removeEventListener("loadeddata", onTopoLoaded);
+      holeVideo?.removeEventListener("loadeddata", onHoleLoaded);
       cockpitVideo?.removeEventListener("loadeddata", onCockpitLoaded);
       constellationVideo?.removeEventListener(
         "loadeddata",
@@ -476,6 +531,7 @@ export function ScrollJourneyHero() {
 
   useEffect(() => {
     const topoQueue = makeSeekQueue(topoVideoRef.current, render);
+    const holeQueue = makeSeekQueue(holeVideoRef.current, render);
     const cockpitQueue = makeSeekQueue(cockpitVideoRef.current, render);
     const constellationQueue = makeSeekQueue(
       constellationVideoRef.current,
@@ -483,11 +539,13 @@ export function ScrollJourneyHero() {
     );
     const orbQueue = makeSeekQueue(orbVideoRef.current, render);
     const topoVideo = topoVideoRef.current;
+    const holeVideo = holeVideoRef.current;
     const cockpitVideo = cockpitVideoRef.current;
     const constellationVideo = constellationVideoRef.current;
     const orbVideo = orbVideoRef.current;
 
     topoVideo?.addEventListener("seeked", topoQueue.handleSeeked);
+    holeVideo?.addEventListener("seeked", holeQueue.handleSeeked);
     cockpitVideo?.addEventListener("seeked", cockpitQueue.handleSeeked);
     constellationVideo?.addEventListener(
       "seeked",
@@ -500,6 +558,7 @@ export function ScrollJourneyHero() {
     if (!canvas || !container) {
       return () => {
         topoVideo?.removeEventListener("seeked", topoQueue.handleSeeked);
+        holeVideo?.removeEventListener("seeked", holeQueue.handleSeeked);
         cockpitVideo?.removeEventListener("seeked", cockpitQueue.handleSeeked);
         constellationVideo?.removeEventListener(
           "seeked",
@@ -541,6 +600,10 @@ export function ScrollJourneyHero() {
             ?.play()
             .then(() => topoVideo.pause())
             .catch(() => {});
+          holeVideo
+            ?.play()
+            .then(() => holeVideo.pause())
+            .catch(() => {});
           cockpitVideo
             ?.play()
             .then(() => cockpitVideo.pause())
@@ -564,9 +627,17 @@ export function ScrollJourneyHero() {
         }
 
         if (progress > P_TOPO_END) {
+          const holeLocal = Math.min(
+            1,
+            Math.max(0, (progress - P_TOPO_END) / (P_HOLE_END - P_TOPO_END))
+          );
+          holeQueue.request(holeLocal * HOLE_SCRUB_SECONDS);
+        }
+
+        if (progress > P_HOLE_END) {
           const cockpitLocal = Math.min(
             1,
-            Math.max(0, (progress - P_TOPO_END) / (P_COCKPIT_END - P_TOPO_END))
+            Math.max(0, (progress - P_HOLE_END) / (P_COCKPIT_END - P_HOLE_END))
           );
           cockpitQueue.request(cockpitLocal * COCKPIT_SCRUB_SECONDS);
         }
@@ -610,6 +681,7 @@ export function ScrollJourneyHero() {
       window.removeEventListener("resize", resize);
       trigger.kill();
       topoVideo?.removeEventListener("seeked", topoQueue.handleSeeked);
+      holeVideo?.removeEventListener("seeked", holeQueue.handleSeeked);
       cockpitVideo?.removeEventListener("seeked", cockpitQueue.handleSeeked);
       constellationVideo?.removeEventListener(
         "seeked",
@@ -646,7 +718,7 @@ export function ScrollJourneyHero() {
       // never bleeds into a crossfade or the other scenes.
       const progress = progressRef.current;
       const inAsteroid = progress < P_AST_END - P_AST_FADE;
-      const inCockpit = progress >= P_TOPO_END && progress < P_COCKPIT_END;
+      const inCockpit = progress >= P_HOLE_END && progress < P_COCKPIT_END;
       const parallaxActive = inAsteroid || inCockpit;
       const applied = parallaxAppliedRef.current;
       const wantX = parallaxActive ? smooth.x : 0;
@@ -792,12 +864,21 @@ export function ScrollJourneyHero() {
     <section
       ref={containerRef}
       className="relative bg-void"
-      style={{ height: "1900vh" }}
+      style={{ height: `${GRAND_TOTAL_VH}vh` }}
     >
       <div className="sticky top-0 h-screen w-full overflow-hidden">
         <video
           ref={topoVideoRef}
           src={TOPO_VIDEO_SRC}
+          preload="auto"
+          muted
+          playsInline
+          className="sr-only"
+          aria-hidden="true"
+        />
+        <video
+          ref={holeVideoRef}
+          src={HOLE_VIDEO_SRC}
           preload="auto"
           muted
           playsInline
